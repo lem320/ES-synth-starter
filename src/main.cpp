@@ -62,6 +62,7 @@ const char* notes [] = {
 volatile int32_t currentStepSize;
 
 volatile uint8_t keyArray[7];
+volatile int8_t knobRotation[4];
 
 SemaphoreHandle_t keyArrayMutex;
 
@@ -105,17 +106,19 @@ void scanKeysTask(void * pvParameters) {
   while (1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
+    // u8g2.clearBuffer();
+    // u8g2.setFont(u8g2_font_ncenB08_tr);
+    // u8g2.drawStr(2,10,"Hello World!");
+
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     float localCurrentStepSize = 0;
     for (uint8_t i=0; i<4; i++) {
       setRow(i);
       delayMicroseconds(3);
       
-      uint8_t keyArrayPrev = keyArray[i] & 15;
-      // Serial.println(keyArray[i]);
+      uint8_t keyArrayPrev = keyArray[i];
       keyArray[i] = readCols();
-      // Serial.println(keyArray[i]);
-
+      // Serial.println("4");
       switch (i) {
         case 0: case 1: case 2:
           for (int j=0; j<4; j++)
@@ -123,27 +126,15 @@ void scanKeysTask(void * pvParameters) {
               localCurrentStepSize = stepSizes[(i*4)+j];
           break;
         case 3:
-          // Serial.println("3");
-          // u8g2.setCursor(2,30);
-          // u8g2.print((int)keyArray[i]);
-
-          // Serial.println(keyArrayPrev);
-          // Serial.println((keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)));
-          // bool tmp = (keyArray[i] & (1 << 0));
-          // if ((keyArrayPrev & (1 << 0)) ^ tmp) {
-          //   u8g2.setCursor(2,30);
-          //   u8g2.print(tmp);
-
-            // Serial.println((keyArray[i] & (1 << 0)));
-            // if (true) {
-            //   Serial.println("1");
-            // } else {
-            //   Serial.println("-1");
-            // }
-            // int rotationVariable = (keyArray[i] & (1 << 0)) ? 1 : -1;
-
-            // Serial.println(rotationVariable);
-          // }
+          Serial.print(" ");
+          // Serial.print(keyArrayPrev,BIN);
+          
+          if (((keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)))) {
+            knobRotation[3] = ((keyArray[i] & (1 << 0)) ^ ((keyArray[i] & (1 << 1)) >> 1)) ? 1 : -1;
+            // Serial.print(" ");
+            // Serial.print(rotationVariable);
+          } else knobRotation[3] = 0;
+          // Serial.println("");
           break;
       }
 
@@ -156,12 +147,14 @@ void scanKeysTask(void * pvParameters) {
 
     xSemaphoreGive(keyArrayMutex);
 
+    // u8g2.sendBuffer(); 
+
 
   }
 }
 
 void displayUpdateTask(void * pvParameters) {
-  const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   while (1) {
@@ -178,6 +171,9 @@ void displayUpdateTask(void * pvParameters) {
         // u8g2.setCursor(2,30);
       }
     }
+
+    u8g2.setCursor(2,20);
+    u8g2.print(knobRotation[3],HEX);
     xSemaphoreGive(keyArrayMutex);
 
     u8g2.sendBuffer(); 
@@ -235,13 +231,14 @@ void setup() {
     2,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
 
+  TaskHandle_t displayUpdateHandle = NULL;
   xTaskCreate(
     displayUpdateTask,		/* Function that implements the task */
     "displayUpdate",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
     1,			/* Task priority */
-    &scanKeysHandle );  /* Pointer to store the task handle */
+    &displayUpdateHandle );  /* Pointer to store the task handle */
 
   vTaskStartScheduler();
 }
