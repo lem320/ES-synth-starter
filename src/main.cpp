@@ -36,9 +36,42 @@
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
-// fs = 22k
-// f_A (9) = 440
-// freq diff = 2^(1/12)
+class Knob {
+  public:
+    Knob() {}
+
+    Knob(int pCurrentRotation, int pLowerLimit, int pUpperLimit) {
+      currentRotation = pCurrentRotation;
+      lowerLimit = pLowerLimit;
+      upperLimit = pUpperLimit;
+      currentTransition = 0;
+    }
+
+    int getRotation() {return currentRotation;}
+
+    void changeRotation(int pTransition = 2) {
+      if (pTransition != 2) currentTransition = pTransition;
+
+      if (currentRotation < upperLimit && currentTransition == 1) __atomic_store_n(&currentRotation, currentRotation+pTransition, __ATOMIC_RELAXED);
+      else if (currentRotation > lowerLimit && currentTransition == -1)  __atomic_store_n(&currentRotation, currentRotation+pTransition, __ATOMIC_RELAXED);;
+    }
+
+  private:
+    int currentRotation;
+    int currentTransition;
+    int lowerLimit;
+    int upperLimit;
+};
+
+//SETUP KNOBS
+// Knob knobs[4] = {
+//   {},
+//   {},
+//   {},
+//   {4,0,8}
+// };
+Knob knob3 (4,0,8);
+
 const double hz = 440;
 const double freq_diff = pow(2,(1.0/12.0));
 const double a = pow(2.0,32)/22000;
@@ -55,14 +88,13 @@ const int32_t stepSizes [] = {
   hz*a,
   hz*freq_diff*a,
   hz*pow(freq_diff,2)*a,
- };
-const char* notes [] = {
-  "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
 };
+const char* notes [] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 volatile int32_t currentStepSize;
 
 volatile uint8_t keyArray[7];
 volatile int8_t knobRotation[4];
+volatile int8_t knobRotationState[4];
 
 SemaphoreHandle_t keyArrayMutex;
 
@@ -95,6 +127,7 @@ void sampleISR() {
   static int32_t phaseAcc = 0;
   phaseAcc += currentStepSize;
   int32_t Vout = (phaseAcc >> 24) - 128;
+  Vout = Vout >> (8 - knob3.getRotation());
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -118,7 +151,7 @@ void scanKeysTask(void * pvParameters) {
       
       uint8_t keyArrayPrev = keyArray[i];
       keyArray[i] = readCols();
-      // Serial.println("4");
+
       switch (i) {
         case 0: case 1: case 2:
           for (int j=0; j<4; j++)
@@ -126,15 +159,13 @@ void scanKeysTask(void * pvParameters) {
               localCurrentStepSize = stepSizes[(i*4)+j];
           break;
         case 3:
-          Serial.print(" ");
-          // Serial.print(keyArrayPrev,BIN);
-          
-          if (((keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)))) {
-            knobRotation[3] = ((keyArray[i] & (1 << 0)) ^ ((keyArray[i] & (1 << 1)) >> 1)) ? 1 : -1;
-            // Serial.print(" ");
-            // Serial.print(rotationVariable);
-          } else knobRotation[3] = 0;
-          // Serial.println("");
+          Serial.print("");
+          if (
+            ( (keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)) ) == 1 &&
+            ( (keyArrayPrev & (1 << 1)) ^ (keyArray[i] & (1 << 1)) ) == 2
+          ) knob3.changeRotation(2);
+          else if (( (keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)) ) == 1)
+            knob3.changeRotation( ((keyArray[i] & (1 << 0)) ^ ((keyArray[i] & (1 << 1)) >> 1)) ? 1 : -1 );
           break;
       }
 
@@ -143,11 +174,9 @@ void scanKeysTask(void * pvParameters) {
     }
     __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
 
-    // for (int i=0; i<2; i++)
 
     xSemaphoreGive(keyArrayMutex);
 
-    // u8g2.sendBuffer(); 
 
 
   }
@@ -173,7 +202,7 @@ void displayUpdateTask(void * pvParameters) {
     }
 
     u8g2.setCursor(2,20);
-    u8g2.print(knobRotation[3],HEX);
+    u8g2.print(knob3.getRotation());
     xSemaphoreGive(keyArrayMutex);
 
     u8g2.sendBuffer(); 
@@ -215,6 +244,8 @@ void setup() {
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
+  // Default Volume
+  // knobRotation[3] = 4;
 
   //Initialise UART
   Serial.begin(9600);
@@ -241,6 +272,7 @@ void setup() {
     &displayUpdateHandle );  /* Pointer to store the task handle */
 
   vTaskStartScheduler();
+
 }
 
 void loop() {
