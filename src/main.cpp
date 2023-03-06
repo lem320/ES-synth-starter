@@ -5,31 +5,6 @@
 //Constants
   const uint32_t interval = 100; //Display update interval
 
-  const double hz = 440;
-  const double freq_diff = pow(2, (1.0 / 12.0));
-  const double a = pow(2.0, 32) / 22000;
-  const int32_t stepSizes[] = {
-      hz * pow(freq_diff, -9) * a,
-      hz *pow(freq_diff, -8) * a,
-      hz *pow(freq_diff, -7) * a,
-      hz *pow(freq_diff, -6) * a,
-      hz *pow(freq_diff, -5) * a,
-      hz *pow(freq_diff, -4) * a,
-      hz *pow(freq_diff, -3) * a,
-      hz *pow(freq_diff, -2) * a,
-      hz *pow(freq_diff, -1) * a,
-      hz *a,
-      hz *freq_diff *a,
-      hz *pow(freq_diff, 2) * a,
-  };
-  const char *notes[] = {
-      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-  volatile int32_t currentStepSize;
-
-  volatile uint8_t keyArray[7];
-
-  SemaphoreHandle_t keyArrayMutex;
-
   // Pin definitions
   // Row select and enable
   const int RA0_PIN = D3;
