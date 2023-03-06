@@ -5,8 +5,33 @@
 //Constants
   const uint32_t interval = 100; //Display update interval
 
-//Pin definitions
-  //Row select and enable
+  const double hz = 440;
+  const double freq_diff = pow(2, (1.0 / 12.0));
+  const double a = pow(2.0, 32) / 22000;
+  const int32_t stepSizes[] = {
+      hz * pow(freq_diff, -9) * a,
+      hz *pow(freq_diff, -8) * a,
+      hz *pow(freq_diff, -7) * a,
+      hz *pow(freq_diff, -6) * a,
+      hz *pow(freq_diff, -5) * a,
+      hz *pow(freq_diff, -4) * a,
+      hz *pow(freq_diff, -3) * a,
+      hz *pow(freq_diff, -2) * a,
+      hz *pow(freq_diff, -1) * a,
+      hz *a,
+      hz *freq_diff *a,
+      hz *pow(freq_diff, 2) * a,
+  };
+  const char *notes[] = {
+      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+  volatile int32_t currentStepSize;
+
+  volatile uint8_t keyArray[7];
+
+  SemaphoreHandle_t keyArrayMutex;
+
+  // Pin definitions
+  // Row select and enable
   const int RA0_PIN = D3;
   const int RA1_PIN = D6;
   const int RA2_PIN = D12;
@@ -110,7 +135,6 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
 }
 
-// MY CODE
 uint8_t readCols(){
   return (uint8_t)digitalRead(C0_PIN) | ((uint8_t)digitalRead(C1_PIN)<<1) | ((uint8_t)digitalRead(C2_PIN)<<2) | ((uint8_t)digitalRead(C3_PIN)<<3);
 }
@@ -182,32 +206,39 @@ void scanKeysTask(void * pvParameters) {
   }
 }
 
-void displayUpdateTask(void * pvParameters) {
-  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
-  TickType_t xLastWakeTime = xTaskGetTickCount();
 
-  while (1) {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+void displayUpdateTask(void *pvParameters)
+{
+      const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
+      TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(2,10,"Hello World!");
+      while (1)
+      {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
-    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    for (int i=0; i<3; i++) {
-      for (int j=0; j<4; j++) if (!(keyArray[i] & (1 << j))) {
-        u8g2.drawStr(2,30,notes[(i*4)+j]); 
-        // u8g2.setCursor(2,30);
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.drawStr(2, 10, "Hello World!");
+        
+        u8g2.setCursor(2,20);
+        u8g2.print(knob3.getRotation());
+
+        xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+        for (int i = 0; i < 3; i++)
+        {
+        
+          for (int j = 0; j < 4; j++)
+            if (!(keyArray[i] & (1 << j)))
+            {
+              u8g2.drawStr(2, 30, notes[(i * 4) + j]);
+              u8g2.setCursor(2, 30);
+            }
+        }
+        xSemaphoreGive(keyArrayMutex);
+
+        u8g2.sendBuffer();
+        digitalToggle(LED_BUILTIN);
       }
-    }
-
-    u8g2.setCursor(2,20);
-    u8g2.print(knob3.getRotation());
-    xSemaphoreGive(keyArrayMutex);
-
-    u8g2.sendBuffer(); 
-    digitalToggle(LED_BUILTIN);
-  }
 }
 
 void setup() {
@@ -236,7 +267,6 @@ void setup() {
   setOutMuxBit(DRST_BIT, HIGH);  //Release display logic reset
   u8g2.begin();
   setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
-
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
@@ -276,5 +306,4 @@ void setup() {
 }
 
 void loop() {
-  
 }
