@@ -77,8 +77,8 @@ class Knob {
     void changeRotation(int pTransition = 2) {
       if (pTransition != 2) currentTransition = pTransition;
 
-      if (currentRotation < upperLimit && currentTransition == 1) __atomic_store_n(&currentRotation, currentRotation+pTransition, __ATOMIC_RELAXED);
-      else if (currentRotation > lowerLimit && currentTransition == -1)  __atomic_store_n(&currentRotation, currentRotation+pTransition, __ATOMIC_RELAXED);;
+      if (currentRotation < upperLimit && currentTransition == 1) __atomic_store_n(&currentRotation, currentRotation+currentTransition, __ATOMIC_RELAXED);
+      else if (currentRotation > lowerLimit && currentTransition == -1)  __atomic_store_n(&currentRotation, currentRotation+currentTransition, __ATOMIC_RELAXED);;
     }
 
   private:
@@ -88,14 +88,13 @@ class Knob {
     int upperLimit;
 };
 
-//SETUP KNOBS
-// Knob knobs[4] = {
-//   {},
-//   {},
-//   {},
-//   {4,0,8}
-// };
-Knob knob3 (4,0,8);
+// SETUP KNOBS
+Knob knobs[4] = {
+  {0,0,10},
+  {0,0,10},
+  {0,0,10},
+  {4,0,8}
+};
 
 const double hz = 440;
 const double freq_diff = pow(2,(1.0/12.0));
@@ -151,7 +150,7 @@ void sampleISR() {
   static int32_t phaseAcc = 0;
   phaseAcc += currentStepSize;
   int32_t Vout = (phaseAcc >> 24) - 128;
-  Vout = Vout >> (8 - knob3.getRotation());
+  Vout = Vout >> (8 - knobs[3].getRotation());
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -169,7 +168,7 @@ void scanKeysTask(void * pvParameters) {
 
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     float localCurrentStepSize = 0;
-    for (uint8_t i=0; i<4; i++) {
+    for (uint8_t i=0; i<5; i++) {
       setRow(i);
       delayMicroseconds(3);
       
@@ -182,16 +181,27 @@ void scanKeysTask(void * pvParameters) {
             if (!(keyArray[i] & (1 << j)))
               localCurrentStepSize = stepSizes[(i*4)+j];
           break;
-        case 3:
+        case 3: case 4:
           Serial.print("");
-          if (
-            ( (keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)) ) == 1 &&
-            ( (keyArrayPrev & (1 << 1)) ^ (keyArray[i] & (1 << 1)) ) == 2
-          ) knob3.changeRotation(2);
-          else if (( (keyArrayPrev & (1 << 0)) ^ (keyArray[i] & (1 << 0)) ) == 1)
-            knob3.changeRotation( ((keyArray[i] & (1 << 0)) ^ ((keyArray[i] & (1 << 1)) >> 1)) ? 1 : -1 );
+
+          for (int j=0; j<2; j++) {
+            if (
+              ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << j) &&
+              ( (keyArrayPrev & (1 << (2*j+1))) ^ (keyArray[i] & (1 << (2*j+1))) ) == (1 << (2*j+1))
+            ) knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation(2);
+            else if (( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j))
+              knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
+          }
+
+          
           break;
       }
+
+      ///  knob3 = i=3, j=0
+      ///  knob2 = i=3, j=1
+      ///  knob1 = i=4, j=0
+      ///  knob0 = i=4, i=1
+
 
 
       
@@ -221,7 +231,13 @@ void displayUpdateTask(void *pvParameters)
         u8g2.drawStr(2, 10, "Hello World!");
         
         u8g2.setCursor(2,20);
-        u8g2.print(knob3.getRotation());
+        u8g2.print(knobs[0].getRotation());
+        u8g2.setCursor(12,20);
+        u8g2.print(knobs[1].getRotation());
+        u8g2.setCursor(22,20);
+        u8g2.print(knobs[2].getRotation());
+        u8g2.setCursor(32,20);
+        u8g2.print(knobs[3].getRotation());
 
         xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
         for (int i = 0; i < 3; i++)
@@ -273,9 +289,6 @@ void setup() {
   sampleTimer->setOverflow(22000, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
-
-  // Default Volume
-  // knobRotation[3] = 4;
 
   //Initialise UART
   Serial.begin(9600);
