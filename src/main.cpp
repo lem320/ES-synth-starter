@@ -5,6 +5,15 @@
 //Constants
   const uint32_t interval = 100; //Display update interval
 
+  const double hz = 440;
+  const double freq_diff = pow(2, (1.0 / 12.0));
+  const double a = pow(2.0, 32) / 22000;
+  const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+  volatile uint8_t keyArray[7];
+
+  SemaphoreHandle_t keyArrayMutex;
+
   // Pin definitions
   // Row select and enable
   const int RA0_PIN = D3;
@@ -63,7 +72,63 @@ class Knob {
     int upperLimit;
 };
 
-// SETUP KNOBS
+class Note {
+  public:
+    Note() {};
+    Note(int power) {
+      stepSize = hz * pow(freq_diff, power) * a;
+      phaseAcc = 0;
+      isPressed = false;
+    }
+    
+    int32_t incrementAndGetPhaseAcc() {
+      if (isPressed) phaseAcc += stepSize;
+      else phaseAcc = 0;
+      Serial.print(phaseAcc);
+      Serial.print(",");
+
+      return phaseAcc;
+    }
+
+    bool getIsPressed() { return isPressed; }
+
+    void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
+    void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
+
+  private:
+    int32_t stepSize;
+    int32_t phaseAcc;
+    bool isPressed;
+};
+
+class Octave {
+  public:
+    Octave() {};
+    Octave(int octave) {
+      for (int i=0; i<12; i++) 
+        {notes[i] = new Note (i-9 + octave*12);}
+    }
+
+    int32_t getTotalPhaseAcc() {
+      int totalPressed = 0;
+      int32_t totalPhaseAcc = 0;
+      for (int i=0; i<12; i++) 
+        if (notes[i]->getIsPressed()) {
+          totalPressed++;
+          totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
+        }
+      Serial.println(totalPhaseAcc);
+      return totalPhaseAcc/totalPressed;
+    }
+
+    void pressNote(int noteIndex) { notes[noteIndex]->pressed(); }
+    void releaseNote(int noteIndex) { notes[noteIndex]->released(); }
+
+  private:
+    Note* notes[12];
+};
+
+// Setip Knobs
 Knob knobs[4] = {
   {0,0,10},
   {0,0,10},
@@ -71,31 +136,7 @@ Knob knobs[4] = {
   {4,0,8}
 };
 
-const double hz = 440;
-const double freq_diff = pow(2,(1.0/12.0));
-const double a = pow(2.0,32)/22000;
-const int32_t stepSizes [] = {
-  hz*pow(freq_diff,-9)*a,
-  hz*pow(freq_diff,-8)*a,
-  hz*pow(freq_diff,-7)*a,
-  hz*pow(freq_diff,-6)*a,
-  hz*pow(freq_diff,-5)*a,
-  hz*pow(freq_diff,-4)*a,
-  hz*pow(freq_diff,-3)*a,
-  hz*pow(freq_diff,-2)*a,
-  hz*pow(freq_diff,-1)*a,
-  hz*a,
-  hz*freq_diff*a,
-  hz*pow(freq_diff,2)*a,
-};
-const char* notes [] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-volatile int32_t currentStepSize;
-
-volatile uint8_t keyArray[7];
-volatile int8_t knobRotation[4];
-volatile int8_t knobRotationState[4];
-
-SemaphoreHandle_t keyArrayMutex;
+Octave octave (0);
 
 //Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
@@ -113,7 +154,7 @@ uint8_t readCols(){
   return (uint8_t)digitalRead(C0_PIN) | ((uint8_t)digitalRead(C1_PIN)<<1) | ((uint8_t)digitalRead(C2_PIN)<<2) | ((uint8_t)digitalRead(C3_PIN)<<3);
 }
 
-void setRow(uint8_t rowIdx){\
+void setRow(uint8_t rowIdx){
   digitalWrite(REN_PIN,LOW);
   digitalWrite(RA0_PIN,(rowIdx & (1 << 0)) ? HIGH : LOW);
   digitalWrite(RA1_PIN,(rowIdx & (1 << 1)) ? HIGH : LOW);
@@ -121,28 +162,24 @@ void setRow(uint8_t rowIdx){\
   digitalWrite(REN_PIN,HIGH);
 }
 
+int32_t phaseAcc2 = 0;
 void sampleISR() {
-  static int32_t phaseAcc = 0;
-  phaseAcc += currentStepSize;
-  int32_t Vout = (phaseAcc >> 24) - 128;
+  int32_t Vout = (octave.getTotalPhaseAcc() >> 24) - 128;
   Vout = Vout >> (8 - knobs[3].getRotation());
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
 
 void scanKeysTask(void * pvParameters) {
+  int32_t phaseAcc[5];
+
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   while (1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
-    // u8g2.clearBuffer();
-    // u8g2.setFont(u8g2_font_ncenB08_tr);
-    // u8g2.drawStr(2,10,"Hello World!");
-
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    float localCurrentStepSize = 0;
     for (uint8_t i=0; i<5; i++) {
       setRow(i);
       delayMicroseconds(3);
@@ -153,41 +190,23 @@ void scanKeysTask(void * pvParameters) {
       switch (i) {
         case 0: case 1: case 2:
           for (int j=0; j<4; j++)
-            if (!(keyArray[i] & (1 << j)))
-              localCurrentStepSize = stepSizes[(i*4)+j];
+            if (!(keyArray[i] & (1 << j))) octave.pressNote(i*4+j);
+            else octave.releaseNote(i*4+j);
           break;
         case 3: case 4:
           Serial.print("");
-
           for (int j=0; j<2; j++) {
             if (
-              ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << j) &&
+              ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
               ( (keyArrayPrev & (1 << (2*j+1))) ^ (keyArray[i] & (1 << (2*j+1))) ) == (1 << (2*j+1))
             ) knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation(2);
             else if (( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j))
               knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
           }
-
-          
           break;
       }
-
-      ///  knob3 = i=3, j=0
-      ///  knob2 = i=3, j=1
-      ///  knob1 = i=4, j=0
-      ///  knob0 = i=4, i=1
-
-
-
-      
     }
-    __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
-
-
     xSemaphoreGive(keyArrayMutex);
-
-
-
   }
 }
 
@@ -261,7 +280,7 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer->setOverflow(100, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
