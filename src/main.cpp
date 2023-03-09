@@ -9,6 +9,7 @@
   const double freq_diff = pow(2, (1.0 / 12.0));
   const double a = pow(2.0, 32) / 22000;
   const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+  const float interuptFreq = 22000;
 
   volatile uint8_t keyArray[7];
 
@@ -72,6 +73,8 @@ class Knob {
     int upperLimit;
 };
 
+const float envelopeGradient = (1.0/interuptFreq);
+
 class Note {
   public:
     Note() {};
@@ -79,18 +82,18 @@ class Note {
       stepSize = hz * pow(freq_diff, power) * a;
       phaseAcc = 0;
       isPressed = false;
+      envelope = 0;
+      envelopeState = 0;
     }
     
     int32_t incrementAndGetPhaseAcc() {
-      if (isPressed) phaseAcc += stepSize;
+      setEnvelope();
+      if (envelope > 0) phaseAcc += stepSize;
       else phaseAcc = 0;
-      Serial.print(phaseAcc);
-      Serial.print(",");
-
-      return phaseAcc;
+      return phaseAcc*envelope;
     }
 
-    bool getIsPressed() { return isPressed; }
+    bool getIsPressed() { return isPressed || (envelope > 0); }
 
     void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
     void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
@@ -99,6 +102,36 @@ class Note {
     int32_t stepSize;
     int32_t phaseAcc;
     bool isPressed;
+    float envelope;
+    int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
+
+
+    void changeEnvelope(float incr) {
+      if (envelope <= 1 && envelope >= 0) envelope += incr*envelopeGradient;
+      if (envelope > 1) envelope = 1;
+      else if (envelope < 0) envelope = 0;
+    }
+    void setEnvelope() {
+      if (envelopeState == 0 && isPressed && envelope >= 1)  envelopeState = 1;
+      else if (envelopeState == 1 && isPressed && envelope <= 0.5) envelopeState = 2;
+      else if (!isPressed) envelopeState = 3;
+      else if (envelopeState == 3 && isPressed) envelopeState = 0;
+
+      switch (envelopeState)
+      {
+      case 0:
+        changeEnvelope(5);
+        break;
+
+      case 1: case 3:
+        changeEnvelope(-1);
+        break;
+      
+      default:
+        break;
+      }
+
+    }
 };
 
 class Octave {
@@ -106,10 +139,10 @@ class Octave {
     Octave() {};
     Octave(int octave) {
       for (int i=0; i<12; i++) 
-        {notes[i] = new Note (i-9 + octave*12);}
+        notes[i] = new Note (i-9 + octave*12);
     }
 
-    int32_t getTotalPhaseAcc() {
+    int32_t getNextTotalPhaseAcc() {
       int totalPressed = 0;
       int32_t totalPhaseAcc = 0;
       for (int i=0; i<12; i++) 
@@ -117,7 +150,7 @@ class Octave {
           totalPressed++;
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
         }
-      Serial.println(totalPhaseAcc);
+      // Serial.println(totalPhaseAcc);
       return totalPhaseAcc/totalPressed;
     }
 
@@ -164,7 +197,7 @@ void setRow(uint8_t rowIdx){
 
 int32_t phaseAcc2 = 0;
 void sampleISR() {
-  int32_t Vout = (octave.getTotalPhaseAcc() >> 24) - 128;
+  int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
   Vout = Vout >> (8 - knobs[3].getRotation());
   analogWrite(OUTR_PIN, Vout + 128);
 }
@@ -280,7 +313,7 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  sampleTimer->setOverflow(100, HERTZ_FORMAT);
+  sampleTimer->setOverflow(interuptFreq, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
