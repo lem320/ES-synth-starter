@@ -8,24 +8,7 @@
   const double hz = 440;
   const double freq_diff = pow(2, (1.0 / 12.0));
   const double a = pow(2.0, 32) / 22000;
-  const int32_t stepSizes[] = {
-      hz * pow(freq_diff, -9) * a,
-      hz *pow(freq_diff, -8) * a,
-      hz *pow(freq_diff, -7) * a,
-      hz *pow(freq_diff, -6) * a,
-      hz *pow(freq_diff, -5) * a,
-      hz *pow(freq_diff, -4) * a,
-      hz *pow(freq_diff, -3) * a,
-      hz *pow(freq_diff, -2) * a,
-      hz *pow(freq_diff, -1) * a,
-      hz *a,
-      hz *freq_diff *a,
-      hz *pow(freq_diff, 2) * a,
-  };
   const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-  volatile int32_t currentStepSize;
-  // int32_t phaseAcc[10] = {0,0,0,0,0,0,0,0,0,0};
-  volatile int32_t phaseAccTotal;
 
   volatile uint8_t keyArray[7];
 
@@ -101,6 +84,8 @@ class Note {
     int32_t incrementAndGetPhaseAcc() {
       if (isPressed) phaseAcc += stepSize;
       else phaseAcc = 0;
+      Serial.print(phaseAcc);
+      Serial.print(",");
 
       return phaseAcc;
     }
@@ -132,6 +117,7 @@ class Octave {
           totalPressed++;
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
         }
+      Serial.println(totalPhaseAcc);
       return totalPhaseAcc/totalPressed;
     }
 
@@ -294,7 +280,7 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer->setOverflow(100, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
