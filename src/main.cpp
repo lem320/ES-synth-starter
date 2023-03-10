@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h>
+#include <ES_CAN.h>
+
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -45,6 +47,13 @@
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
+
+//CAN
+volatile uint8_t TX_Message[8] = {0};
+uint8_t RX_Message[8]={0};
+
+QueueHandle_t msgInQ;
+
 
 class Knob {
   public:
@@ -145,11 +154,13 @@ class Octave {
     int32_t getNextTotalPhaseAcc() {
       int totalPressed = 0;
       int32_t totalPhaseAcc = 0;
-      for (int i=0; i<12; i++) 
-        if (notes[i]->getIsPressed()) {
+      for (int i=0; i<12; i++) {
+      
+        if (notes[i]->getIsPressed()) 
           totalPressed++;
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
-        }
+        
+      }
       // Serial.println(totalPhaseAcc);
       return totalPhaseAcc/totalPressed;
     }
@@ -202,29 +213,83 @@ void sampleISR() {
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+}
+
+void decodeTask(void * pvParameters){
+  while(1)
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+}
 
 void scanKeysTask(void * pvParameters) {
   int32_t phaseAcc[5];
-
+  uint8_t keypressrelease[3] = {' '} ;
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
+  int8_t keyxor;
+  
+  int notenumber = 0; 
+  uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
 
   while (1) {
+    uint8_t jIndex = 'R';
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
-
+    
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    
+
     for (uint8_t i=0; i<5; i++) {
       setRow(i);
       delayMicroseconds(3);
-      
       uint8_t keyArrayPrev = keyArray[i];
+      uint8_t keyArrayPrev1 = keyArray[1];
       keyArray[i] = readCols();
+      //Serial.println(keyArrayPrev1 ^ keyArray[1]);
+      //Serial.println(keypressrelease); //remove this to make note number work again
+      keyxor = keyArrayPrev ^ keyArray[i];
+      if(keyxor != 0){
+            Serial.println(keypressrelease[0]);
 
+            for (int j=0; j<4; j++){
+              if (keypressrelease[j] == 'P'){
+                jIndex = 'P';
+              }
+            }
+
+            //Serial.println(jIndex);
+
+            TX_Message[0] = jIndex;
+            TX_Message[1] = 4;
+            TX_Message[2] = notenumber;
+            txmessage_nonvolatile[0] = TX_Message[0];
+            txmessage_nonvolatile[1] = TX_Message[1];
+            txmessage_nonvolatile[2] = TX_Message[2];
+            
+            CAN_TX(0x123, txmessage_nonvolatile);
+            
+            
+          }
+      
+      
       switch (i) {
         case 0: case 1: case 2:
-          for (int j=0; j<4; j++)
-            if (!(keyArray[i] & (1 << j))) octave.pressNote(i*4+j);
-            else octave.releaseNote(i*4+j);
+        
+          for (int j=0; j<4; j++){            
+            if (!(keyArray[i] & (1 << j))){
+              keypressrelease[j] = 'P';
+              octave.pressNote(i*4+j);
+              notenumber = (i*4)+j;
+            }
+            else {
+              octave.releaseNote(i*4+j);
+              keypressrelease[j] = 'R';
+            }
+            
+          } 
           break;
         case 3: case 4:
           Serial.print("");
@@ -248,14 +313,19 @@ void displayUpdateTask(void *pvParameters)
 {
       const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
       TickType_t xLastWakeTime = xTaskGetTickCount();
+      uint32_t ID;
 
       while (1)
       {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        
 
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_ncenB08_tr);
-        u8g2.drawStr(2, 10, "Hello World!");
+        u8g2.setCursor(66,30);
+        u8g2.print((char) RX_Message[0]);
+        u8g2.print(RX_Message[1]);
+        u8g2.print(RX_Message[2]);
         
         u8g2.setCursor(2,20);
         u8g2.print(knobs[0].getRotation());
@@ -286,6 +356,11 @@ void displayUpdateTask(void *pvParameters)
 
 void setup() {
   // put your setup code here, to run once:
+  msgInQ = xQueueCreate(36,8);
+  CAN_Init(true);
+  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  setCANFilter(0x123,0x7ff);
+  CAN_Start();
 
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -329,8 +404,18 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
+
+  TaskHandle_t decodeTaskHandle  = NULL;
+  xTaskCreate(
+    decodeTask ,		/* Function that implements the task */
+    "decodeTask ",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */
+    &decodeTaskHandle);  /* Pointer to store the task handle */    
+
 
   TaskHandle_t displayUpdateHandle = NULL;
   xTaskCreate(
