@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h>
+#include <ES_CAN.h>
+
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -8,23 +10,8 @@
   const double hz = 440;
   const double freq_diff = pow(2, (1.0 / 12.0));
   const double a = pow(2.0, 32) / 22000;
-  const int32_t stepSizes[] = {
-      hz * pow(freq_diff, -9) * a,
-      hz *pow(freq_diff, -8) * a,
-      hz *pow(freq_diff, -7) * a,
-      hz *pow(freq_diff, -6) * a,
-      hz *pow(freq_diff, -5) * a,
-      hz *pow(freq_diff, -4) * a,
-      hz *pow(freq_diff, -3) * a,
-      hz *pow(freq_diff, -2) * a,
-      hz *pow(freq_diff, -1) * a,
-      hz *a,
-      hz *freq_diff *a,
-      hz *pow(freq_diff, 2) * a,
-  };
-  const char *notes[] = {
-      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-  volatile int32_t currentStepSize;
+  const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+  const float interuptFreq = 22000;
 
   volatile uint8_t keyArray[7];
 
@@ -61,6 +48,140 @@
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
+//CAN
+volatile uint8_t TX_Message[8] = {0};
+uint8_t RX_Message[8]={0};
+
+QueueHandle_t msgInQ;
+
+
+class Knob {
+  public:
+    Knob() {}
+
+    Knob(int pCurrentRotation, int pLowerLimit, int pUpperLimit) {
+      currentRotation = pCurrentRotation;
+      lowerLimit = pLowerLimit;
+      upperLimit = pUpperLimit;
+      currentTransition = 0;
+    }
+
+    int getRotation() {return currentRotation;}
+
+    void changeRotation(int pTransition = 2) {
+      if (pTransition != 2) currentTransition = pTransition;
+
+      if (currentRotation < upperLimit && currentTransition == 1) __atomic_store_n(&currentRotation, currentRotation+currentTransition, __ATOMIC_RELAXED);
+      else if (currentRotation > lowerLimit && currentTransition == -1)  __atomic_store_n(&currentRotation, currentRotation+currentTransition, __ATOMIC_RELAXED);;
+    }
+
+  private:
+    int currentRotation;
+    int currentTransition;
+    int lowerLimit;
+    int upperLimit;
+};
+
+const float envelopeGradient = (1.0/interuptFreq);
+
+class Note {
+  public:
+    Note() {};
+    Note(int power) {
+      stepSize = hz * pow(freq_diff, power) * a;
+      phaseAcc = 0;
+      isPressed = false;
+      envelope = 0;
+      envelopeState = 0;
+    }
+    
+    int32_t incrementAndGetPhaseAcc() {
+      setEnvelope();
+      if (envelope > 0) phaseAcc += stepSize;
+      else phaseAcc = 0;
+      return phaseAcc*envelope;
+    }
+
+    bool getIsPressed() { return isPressed || (envelope > 0); }
+
+    void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
+    void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
+
+  private:
+    int32_t stepSize;
+    int32_t phaseAcc;
+    bool isPressed;
+    float envelope;
+    int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
+
+
+    void changeEnvelope(float incr) {
+      if (envelope <= 1 && envelope >= 0) envelope += incr*envelopeGradient;
+      if (envelope > 1) envelope = 1;
+      else if (envelope < 0) envelope = 0;
+    }
+    void setEnvelope() {
+      if (envelopeState == 0 && isPressed && envelope >= 1)  envelopeState = 1;
+      else if (envelopeState == 1 && isPressed && envelope <= 0.5) envelopeState = 2;
+      else if (!isPressed) envelopeState = 3;
+      else if (envelopeState == 3 && isPressed) envelopeState = 0;
+
+      switch (envelopeState)
+      {
+      case 0:
+        changeEnvelope(5);
+        break;
+
+      case 1: case 3:
+        changeEnvelope(-1);
+        break;
+      
+      default:
+        break;
+      }
+
+    }
+};
+
+class Octave {
+  public:
+    Octave() {};
+    Octave(int octave) {
+      for (int i=0; i<12; i++) 
+        notes[i] = new Note (i-9 + octave*12);
+    }
+
+    int32_t getNextTotalPhaseAcc() {
+      int totalPressed = 0;
+      int32_t totalPhaseAcc = 0;
+      for (int i=0; i<12; i++) {
+      
+        if (notes[i]->getIsPressed()) 
+          totalPressed++;
+          totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
+        
+      }
+      // Serial.println(totalPhaseAcc);
+      return totalPhaseAcc/totalPressed;
+    }
+
+    void pressNote(int noteIndex) { notes[noteIndex]->pressed(); }
+    void releaseNote(int noteIndex) { notes[noteIndex]->released(); }
+
+  private:
+    Note* notes[12];
+};
+
+// Setip Knobs
+Knob knobs[4] = {
+  {0,0,10},
+  {0,0,10},
+  {0,0,10},
+  {4,0,8}
+};
+
+Octave octave (0);
+
 //Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
@@ -73,89 +194,152 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
 }
 
-// MY CODE
-uint8_t readCols()
-{
-      return (uint8_t)digitalRead(C0_PIN) | ((uint8_t)digitalRead(C1_PIN) << 1) | ((uint8_t)digitalRead(C2_PIN) << 2) | ((uint8_t)digitalRead(C3_PIN) << 3);
+uint8_t readCols(){
+  return (uint8_t)digitalRead(C0_PIN) | ((uint8_t)digitalRead(C1_PIN)<<1) | ((uint8_t)digitalRead(C2_PIN)<<2) | ((uint8_t)digitalRead(C3_PIN)<<3);
 }
 
-void setRow(uint8_t rowIdx)
-{
-      digitalWrite(REN_PIN, LOW);
-      digitalWrite(RA0_PIN, (rowIdx & (1 << 0)) ? HIGH : LOW);
-      digitalWrite(RA1_PIN, (rowIdx & (1 << 1)) ? HIGH : LOW);
-      digitalWrite(RA2_PIN, (rowIdx & (1 << 2)) ? HIGH : LOW);
-      digitalWrite(REN_PIN, HIGH);
+void setRow(uint8_t rowIdx){
+  digitalWrite(REN_PIN,LOW);
+  digitalWrite(RA0_PIN,(rowIdx & (1 << 0)) ? HIGH : LOW);
+  digitalWrite(RA1_PIN,(rowIdx & (1 << 1)) ? HIGH : LOW);
+  digitalWrite(RA2_PIN,(rowIdx & (1 << 2)) ? HIGH : LOW);
+  digitalWrite(REN_PIN,HIGH);
 }
 
-void sampleISR()
-{
-      static int32_t phaseAcc = 0;
-      phaseAcc += currentStepSize;
-      int32_t Vout = (phaseAcc >> 24) - 128;
-      analogWrite(OUTR_PIN, Vout + 128);
+int32_t phaseAcc2 = 0;
+void sampleISR() {
+  int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
+  Vout = Vout >> (8 - knobs[3].getRotation());
+  analogWrite(OUTR_PIN, Vout + 128);
 }
 
-void scanKeysTask(void *pvParameters)
-{
-      const TickType_t xFrequency = 50 / portTICK_PERIOD_MS;
-      TickType_t xLastWakeTime = xTaskGetTickCount();
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+}
 
-      while (1)
-      {
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+void decodeTask(void * pvParameters){
+  while(1)
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+}
 
-        xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-        float localCurrentStepSize = 0;
-        for (uint8_t i = 0; i < 4; i++)
-        {
-          setRow(i);
-          delayMicroseconds(3);
-          uint8_t keyArrayPrev = keyArray[i];
-          keyArray[i] = readCols();
+void scanKeysTask(void * pvParameters) {
+  int32_t phaseAcc[5];
+  uint8_t keypressrelease[3] = {' '} ;
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  int8_t keyxor;
+  
+  int notenumber = 0; 
+  uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
 
-          switch (i)
-          {
-          case 0:
-          case 1:
-          case 2:
-            for (int j = 0; j < 4; j++)
-              if (!(keyArray[i] & (1 << j)))
-                localCurrentStepSize = stepSizes[(i * 4) + j];
-            /*case 3:
-              if (keyArrayPrev != keyArray[i])
-              {
-                Serial.println(keyArrayPrev << 8);
-              }*/
+  while (1) {
+    uint8_t jIndex = 'R';
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    
+    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    
+
+    for (uint8_t i=0; i<5; i++) {
+      setRow(i);
+      delayMicroseconds(3);
+      uint8_t keyArrayPrev = keyArray[i];
+      uint8_t keyArrayPrev1 = keyArray[1];
+      keyArray[i] = readCols();
+      //Serial.println(keyArrayPrev1 ^ keyArray[1]);
+      //Serial.println(keypressrelease); //remove this to make note number work again
+      keyxor = keyArrayPrev ^ keyArray[i];
+      if(keyxor != 0){
+            Serial.println(keypressrelease[0]);
+
+            for (int j=0; j<4; j++){
+              if (keypressrelease[j] == 'P'){
+                jIndex = 'P';
+              }
+            }
+
+            //Serial.println(jIndex);
+
+            TX_Message[0] = jIndex;
+            TX_Message[1] = 4;
+            TX_Message[2] = notenumber;
+            txmessage_nonvolatile[0] = TX_Message[0];
+            txmessage_nonvolatile[1] = TX_Message[1];
+            txmessage_nonvolatile[2] = TX_Message[2];
+            
+            CAN_TX(0x123, txmessage_nonvolatile);
+            
+            
           }
-        }
-        __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
-
-        // for (int i=0; i<2; i++)
-
-        xSemaphoreGive(keyArrayMutex);
+      
+      
+      switch (i) {
+        case 0: case 1: case 2:
+        
+          for (int j=0; j<4; j++){            
+            if (!(keyArray[i] & (1 << j))){
+              keypressrelease[j] = 'P';
+              octave.pressNote(i*4+j);
+              notenumber = (i*4)+j;
+            }
+            else {
+              octave.releaseNote(i*4+j);
+              keypressrelease[j] = 'R';
+            }
+            
+          } 
+          break;
+        case 3: case 4:
+          Serial.print("");
+          for (int j=0; j<2; j++) {
+            if (
+              ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
+              ( (keyArrayPrev & (1 << (2*j+1))) ^ (keyArray[i] & (1 << (2*j+1))) ) == (1 << (2*j+1))
+            ) knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation(2);
+            else if (( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j))
+              knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
+          }
+          break;
       }
+    }
+    xSemaphoreGive(keyArrayMutex);
+  }
 }
+
 
 void displayUpdateTask(void *pvParameters)
 {
       const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
       TickType_t xLastWakeTime = xTaskGetTickCount();
+      uint32_t ID;
 
       while (1)
       {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        
 
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_ncenB08_tr);
-        u8g2.drawStr(2, 10, "Hello World!");
+        u8g2.setCursor(66,30);
+        u8g2.print((char) RX_Message[0]);
+        u8g2.print(RX_Message[1]);
+        u8g2.print(RX_Message[2]);
+        
+        u8g2.setCursor(2,20);
+        u8g2.print(knobs[0].getRotation());
+        u8g2.setCursor(12,20);
+        u8g2.print(knobs[1].getRotation());
+        u8g2.setCursor(22,20);
+        u8g2.print(knobs[2].getRotation());
+        u8g2.setCursor(32,20);
+        u8g2.print(knobs[3].getRotation());
 
         xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
         for (int i = 0; i < 3; i++)
         {
-          u8g2.setCursor(2 + (i * 10), 20);
-          u8g2.print(keyArray[i], HEX);
-
+        
           for (int j = 0; j < 4; j++)
             if (!(keyArray[i] & (1 << j)))
             {
@@ -172,6 +356,11 @@ void displayUpdateTask(void *pvParameters)
 
 void setup() {
   // put your setup code here, to run once:
+  msgInQ = xQueueCreate(36,8);
+  CAN_Init(true);
+  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  setCANFilter(0x123,0x7ff);
+  CAN_Start();
 
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -199,35 +388,47 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer->setOverflow(interuptFreq, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
   //Initialise UART
   Serial.begin(9600);
+  Serial.println("Starting ...");
 
   keyArrayMutex = xSemaphoreCreateMutex();
 
   TaskHandle_t scanKeysHandle = NULL;
   xTaskCreate(
-      scanKeysTask,     /* Function that implements the task */
-      "scanKeys",       /* Text name for the task */
-      64,               /* Stack size in words, not bytes */
-      NULL,             /* Parameter passed into the task */
-      2,                /* Task priority */
-      &scanKeysHandle); /* Pointer to store the task handle */
+    scanKeysTask,		/* Function that implements the task */
+    "scanKeys",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    3,			/* Task priority */
+    &scanKeysHandle );  /* Pointer to store the task handle */
 
+  TaskHandle_t decodeTaskHandle  = NULL;
   xTaskCreate(
-      displayUpdateTask, /* Function that implements the task */
-      "displayUpdate",   /* Text name for the task */
-      64,                /* Stack size in words, not bytes */
-      NULL,              /* Parameter passed into the task */
-      1,                 /* Task priority */
-      &scanKeysHandle);  /* Pointer to store the task handle */
+    decodeTask ,		/* Function that implements the task */
+    "decodeTask ",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */
+    &decodeTaskHandle);  /* Pointer to store the task handle */    
+
+
+  TaskHandle_t displayUpdateHandle = NULL;
+  xTaskCreate(
+    displayUpdateTask,		/* Function that implements the task */
+    "displayUpdate",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &displayUpdateHandle );  /* Pointer to store the task handle */
 
   vTaskStartScheduler();
+
 }
 
-void loop()
-{
+void loop() {
 }
