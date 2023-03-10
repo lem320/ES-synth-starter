@@ -51,6 +51,7 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 //CAN
 volatile uint8_t TX_Message[8] = {0};
 uint8_t RX_Message[8]={0};
+uint8_t keypressrelease[4] = {0} ;
 
 QueueHandle_t msgInQ;
 
@@ -227,7 +228,6 @@ void decodeTask(void * pvParameters){
 
 void scanKeysTask(void * pvParameters) {
   int32_t phaseAcc[5];
-  uint8_t keypressrelease[3] = {' '} ;
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   int8_t keyxor;
@@ -235,8 +235,7 @@ void scanKeysTask(void * pvParameters) {
   int notenumber = 0; 
   uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
 
-  while (1) {
-    uint8_t jIndex = 'R';
+  while (1) {    
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
@@ -246,16 +245,46 @@ void scanKeysTask(void * pvParameters) {
       setRow(i);
       delayMicroseconds(3);
       uint8_t keyArrayPrev = keyArray[i];
-      uint8_t keyArrayPrev1 = keyArray[1];
       keyArray[i] = readCols();
       //Serial.println(keyArrayPrev1 ^ keyArray[1]);
       //Serial.println(keypressrelease); //remove this to make note number work again
       keyxor = keyArrayPrev ^ keyArray[i];
-      if(keyxor != 0){
-            Serial.println(keypressrelease[0]);
+      
+      
+      
+      switch (i) {
+        case 0: case 1: case 2:
+        
+          for (int j=0; j<4; j++){            
+            if (!(keyArray[i] & (1 << j))){
+              keypressrelease[j] = 1;
+              octave.pressNote(i*4+j);
+              notenumber = (i*4)+j;
+            }
+            else {
+              octave.releaseNote(i*4+j);
+              keypressrelease[j] = 0;
+            }
+            
+          } 
+          break;
+        case 3: case 4:
+          Serial.print("");
+          for (int j=0; j<2; j++) {
+            if (
+              ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
+              ( (keyArrayPrev & (1 << (2*j+1))) ^ (keyArray[i] & (1 << (2*j+1))) ) == (1 << (2*j+1))
+            ) knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation(2);
+            else if (( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j))
+              knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
+          }
+          break;
+      }
 
+      if(keyxor != 0){
+            uint8_t jIndex = 'R';
             for (int j=0; j<4; j++){
-              if (keypressrelease[j] == 'P'){
+              if (keypressrelease[j] == 1){
                 jIndex = 'P';
               }
             }
@@ -273,36 +302,6 @@ void scanKeysTask(void * pvParameters) {
             
             
           }
-      
-      
-      switch (i) {
-        case 0: case 1: case 2:
-        
-          for (int j=0; j<4; j++){            
-            if (!(keyArray[i] & (1 << j))){
-              keypressrelease[j] = 'P';
-              octave.pressNote(i*4+j);
-              notenumber = (i*4)+j;
-            }
-            else {
-              octave.releaseNote(i*4+j);
-              keypressrelease[j] = 'R';
-            }
-            
-          } 
-          break;
-        case 3: case 4:
-          Serial.print("");
-          for (int j=0; j<2; j++) {
-            if (
-              ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
-              ( (keyArrayPrev & (1 << (2*j+1))) ^ (keyArray[i] & (1 << (2*j+1))) ) == (1 << (2*j+1))
-            ) knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation(2);
-            else if (( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j))
-              knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
-          }
-          break;
-      }
     }
     xSemaphoreGive(keyArrayMutex);
   }
