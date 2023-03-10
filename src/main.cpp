@@ -1,15 +1,18 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h>
+#include <cmath>
 
 //Constants
   const uint32_t interval = 100; //Display update interval
 
+  const float interuptFreq = 1000;
+
   const double hz = 440;
   const double freq_diff = pow(2, (1.0 / 12.0));
-  const double a = pow(2.0, 32) / 22000;
+  const double a = pow(2.0, 32) / interuptFreq;
   const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-  const float interuptFreq = 22000;
+  #define PI 3.14159265358
 
   volatile uint8_t keyArray[7];
 
@@ -74,23 +77,34 @@ class Knob {
 };
 
 const float envelopeGradient = (1.0/interuptFreq);
+const double b = pow(2.0, 31);
+
+int32_t sine_table[10001];
 
 class Note {
   public:
     Note() {};
     Note(int power) {
-      stepSize = hz * pow(freq_diff, power) * a;
+      frequency = hz*pow(freq_diff, power);
+      // Serial.println(frequency);
+      stepSize = frequency * a;
       phaseAcc = 0;
       isPressed = false;
       envelope = 0;
       envelopeState = 0;
+      time = 0;
+      wave = 2;
     }
     
     int32_t incrementAndGetPhaseAcc() {
       setEnvelope();
-      if (envelope > 0) phaseAcc += stepSize;
-      else phaseAcc = 0;
+      if (isPressed || envelope > 0) nextPhaseAcc();
+      else {
+        phaseAcc = 0;
+        time = 0;
+      }
       return phaseAcc*envelope;
+      // return phaseAcc;
     }
 
     bool getIsPressed() { return isPressed || (envelope > 0); }
@@ -100,11 +114,23 @@ class Note {
 
   private:
     int32_t stepSize;
-    int32_t phaseAcc;
+    float time;
+    float frequency;
+    int wave; // 0 is sawtooth, 1 is square and 2 is sine
+
+    uint32_t phaseAcc;
     bool isPressed;
     float envelope;
     int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
 
+    void nextPhaseAcc() {
+      if (wave == 0) phaseAcc += stepSize;
+      else if (wave == 2) {
+        phaseAcc = sine_table[(int)(frequency*time*10000)];
+        time += envelopeGradient;
+        if (time >= (1.0/frequency)) time = 0;
+      }
+    }
 
     void changeEnvelope(float incr) {
       if (envelope <= 1 && envelope >= 0) envelope += incr*envelopeGradient;
@@ -119,16 +145,16 @@ class Note {
 
       switch (envelopeState)
       {
-      case 0:
-        changeEnvelope(5);
-        break;
+        case 0:
+          changeEnvelope(5);
+          break;
 
-      case 1: case 3:
-        changeEnvelope(-1);
-        break;
-      
-      default:
-        break;
+        case 1: case 3:
+          changeEnvelope(-2);
+          break;
+        
+        default:
+          break;
       }
 
     }
@@ -150,7 +176,6 @@ class Octave {
           totalPressed++;
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
         }
-      // Serial.println(totalPhaseAcc);
       return totalPhaseAcc/totalPressed;
     }
 
@@ -198,7 +223,12 @@ void setRow(uint8_t rowIdx){
 int32_t phaseAcc2 = 0;
 void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
+
+
   Vout = Vout >> (8 - knobs[3].getRotation());
+  Serial.println(Vout);
+
+  
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -227,7 +257,7 @@ void scanKeysTask(void * pvParameters) {
             else octave.releaseNote(i*4+j);
           break;
         case 3: case 4:
-          Serial.print("");
+          // Serial.print("");
           for (int j=0; j<2; j++) {
             if (
               ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
@@ -287,6 +317,10 @@ void displayUpdateTask(void *pvParameters)
 void setup() {
   // put your setup code here, to run once:
 
+  for (int index = 0; index < 10001; index++) {
+      sine_table[index] = b*(sin(2*PI * index / 10000.0)+1);
+  }
+
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);
@@ -318,7 +352,7 @@ void setup() {
   sampleTimer->resume();
 
   //Initialise UART
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Starting ...");
 
   keyArrayMutex = xSemaphoreCreateMutex();
