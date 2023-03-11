@@ -51,8 +51,11 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 //CAN
 volatile uint8_t TX_Message[8] = {0};
 uint8_t RX_Message[8]={0};
+uint8_t keypressrelease[4] = {0} ;
 
 QueueHandle_t msgInQ;
+QueueHandle_t msgOutQ;
+SemaphoreHandle_t CAN_TX_Semaphore;
 
 
 class Knob {
@@ -220,14 +223,34 @@ void CAN_RX_ISR (void) {
 	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
 }
 
+void CAN_TX_ISR (void) {
+	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+}
+
+void CAN_TX_Task (void * pvParameters) {
+	uint8_t msgOut[8];
+	while (1) {
+		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
+}
+
+
 void decodeTask(void * pvParameters){
   while(1)
   xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+  //if key is releasd, then set current step size to zero 
+  if(RX_Message[0] == 'R'){
+
+    octave.releaseNote(RX_Message[2]); //need to check this with luke 
+
+  }
+
 }
 
 void scanKeysTask(void * pvParameters) {
   int32_t phaseAcc[5];
-  uint8_t keypressrelease[3] = {' '} ;
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   int8_t keyxor;
@@ -235,8 +258,7 @@ void scanKeysTask(void * pvParameters) {
   int notenumber = 0; 
   uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
 
-  while (1) {
-    uint8_t jIndex = 'R';
+  while (1) {    
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
@@ -246,33 +268,11 @@ void scanKeysTask(void * pvParameters) {
       setRow(i);
       delayMicroseconds(3);
       uint8_t keyArrayPrev = keyArray[i];
-      uint8_t keyArrayPrev1 = keyArray[1];
       keyArray[i] = readCols();
       //Serial.println(keyArrayPrev1 ^ keyArray[1]);
       //Serial.println(keypressrelease); //remove this to make note number work again
       keyxor = keyArrayPrev ^ keyArray[i];
-      if(keyxor != 0){
-            Serial.println(keypressrelease[0]);
-
-            for (int j=0; j<4; j++){
-              if (keypressrelease[j] == 'P'){
-                jIndex = 'P';
-              }
-            }
-
-            //Serial.println(jIndex);
-
-            TX_Message[0] = jIndex;
-            TX_Message[1] = 4;
-            TX_Message[2] = notenumber;
-            txmessage_nonvolatile[0] = TX_Message[0];
-            txmessage_nonvolatile[1] = TX_Message[1];
-            txmessage_nonvolatile[2] = TX_Message[2];
-            
-            CAN_TX(0x123, txmessage_nonvolatile);
-            
-            
-          }
+      
       
       
       switch (i) {
@@ -280,13 +280,13 @@ void scanKeysTask(void * pvParameters) {
         
           for (int j=0; j<4; j++){            
             if (!(keyArray[i] & (1 << j))){
-              keypressrelease[j] = 'P';
+              keypressrelease[j] = 1;
               octave.pressNote(i*4+j);
               notenumber = (i*4)+j;
             }
             else {
               octave.releaseNote(i*4+j);
-              keypressrelease[j] = 'R';
+              keypressrelease[j] = 0;
             }
             
           } 
@@ -303,6 +303,29 @@ void scanKeysTask(void * pvParameters) {
           }
           break;
       }
+
+      if(keyxor != 0){
+            uint8_t jIndex = 'R';
+            for (int j=0; j<4; j++){
+              if (keypressrelease[j] == 1){
+                jIndex = 'P';
+              }
+            }
+
+            //Serial.println(jIndex);
+
+            TX_Message[0] = jIndex;
+            TX_Message[1] = 4;
+            TX_Message[2] = notenumber;
+            txmessage_nonvolatile[0] = TX_Message[0];
+            txmessage_nonvolatile[1] = TX_Message[1];
+            txmessage_nonvolatile[2] = TX_Message[2];
+
+            xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+            //CAN_TX(0x123, txmessage_nonvolatile);
+            
+            
+          }
     }
     xSemaphoreGive(keyArrayMutex);
   }
@@ -357,8 +380,12 @@ void displayUpdateTask(void *pvParameters)
 void setup() {
   // put your setup code here, to run once:
   msgInQ = xQueueCreate(36,8);
+  msgOutQ = xQueueCreate(36,8);
+
   CAN_Init(true);
   CAN_RegisterRX_ISR(CAN_RX_ISR);
+  CAN_RegisterTX_ISR(CAN_TX_ISR);
+  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
   setCANFilter(0x123,0x7ff);
   CAN_Start();
 
@@ -404,7 +431,7 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    4,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
 
   TaskHandle_t decodeTaskHandle  = NULL;
@@ -413,9 +440,17 @@ void setup() {
     "decodeTask ",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &decodeTaskHandle);  /* Pointer to store the task handle */    
 
+    TaskHandle_t CAN_TX_TaskHandle = NULL;
+  xTaskCreate(
+    CAN_TX_Task,		/* Function that implements the task */
+    "CAN_TX_queue",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */
+    &CAN_TX_TaskHandle );  /* Pointer to store the task handle */
 
   TaskHandle_t displayUpdateHandle = NULL;
   xTaskCreate(
@@ -425,6 +460,8 @@ void setup() {
     NULL,			/* Parameter passed into the task */
     1,			/* Task priority */
     &displayUpdateHandle );  /* Pointer to store the task handle */
+
+
 
   vTaskStartScheduler();
 
