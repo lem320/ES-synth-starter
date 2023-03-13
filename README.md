@@ -8,3 +8,16 @@
 
 ## Additional Information
   [Handshaking and auto-detection](doc/handshaking.md)
+
+
+# Polyphony
+
+ ## Envelope
+
+ ### Waveform Selection
+
+  
+### Low Frequency Oscillator
+
+    
+ 
