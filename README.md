@@ -9,16 +9,18 @@
 ## Additional Information
   [Handshaking and auto-detection](doc/handshaking.md)
 
-
+# Features
 ## Polyphony
 
 ## Envelope
   ### Implementation
-  ### 
+  ### Timings
 
 ## Waveform Selection
 
 ## Low Frequency Oscillator
+
+## CPU Utilisation
 
     
  
