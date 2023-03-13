@@ -29,11 +29,17 @@
 
 
 # Rate Monotonic Scheduler
+A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met
+under worst-case conditions
 
 # CPU Utilisation
+A quantification of total CPU utilisation
 
 # Synchronisation
+An identification of all the shared data structures and the methods used to guarantee safe access
+and synchronisation
 
 # Dependencies
+An analysis of inter-task blocking dependencies that shows any possibility of deadlock
     
  
