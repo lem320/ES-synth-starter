@@ -11,16 +11,29 @@
 
 # Features
 ## Polyphony
+  ### Implementation
+  ### Timings
 
 ## Envelope
   ### Implementation
   ### Timings
 
 ## Waveform Selection
+  ### Implementation
+  ### Timings
 
 ## Low Frequency Oscillator
+  ### Implementation
+  ### Timings
 
-## CPU Utilisation
 
+
+# Rate Monotonic Scheduler
+
+# CPU Utilisation
+
+# Synchronisation
+
+# Dependencies
     
  
