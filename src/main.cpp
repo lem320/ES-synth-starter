@@ -2,6 +2,8 @@
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
+#include <deque>
+#include <queue>
 
 
 //Constants
@@ -16,6 +18,7 @@
   volatile uint8_t keyArray[7];
 
   SemaphoreHandle_t keyArrayMutex;
+  SemaphoreHandle_t bufferSemaphore;
 
   // Pin definitions
   // Row select and enable
@@ -51,10 +54,13 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 //CAN
 volatile uint8_t TX_Message[8] = {0};
 uint8_t RX_Message[8]={0};
-uint8_t keypressrelease[4] = {0} ;
+uint8_t keypressrelease[4] = {0};
 
 QueueHandle_t msgInQ;
 
+uint8_t reverbBuffer1[256];
+uint8_t reverbBuffer2[256];
+volatile bool writeBuffer1 = false;
 
 class Knob {
   public:
@@ -144,6 +150,43 @@ class Note {
     }
 };
 
+// int32_t bufferReverb[10000];
+
+class Reverb {
+  public:
+    Reverb() {
+      reverbDeque.assign (10, 0);
+      std::queue<int32_t> reverbBuffer (reverbDeque);
+      totalReverb = 0;
+    }
+
+    int32_t getReverb (int32_t knobValue){
+    //   int32_t totalReverb = 0;
+    //   int32_t total = 2*knobValue;
+    //   //Serial.println(total);
+    //   for (uint8_t value = 0; value < total; value++){
+    //     totalReverb += reverbBuffer[value];
+    //   }
+    
+      return totalReverb / 2;
+    }
+
+    void updateReverb (int32_t note){
+      //reverbBuffer.pop_back();
+      totalReverb += note;
+      totalReverb -= reverbBuffer.front();
+      reverbBuffer.push(note);
+      reverbBuffer.pop();
+      
+      //Serial.println(reverbBuffer.size());
+    }
+  private:
+    std::queue<int32_t> reverbBuffer;
+    std::deque<int32_t> reverbDeque;
+    int32_t totalReverb;
+
+};
+
 class Octave {
   public:
     Octave() {};
@@ -183,6 +226,8 @@ Knob knobs[4] = {
 
 Octave octave (0);
 
+Reverb reverb;
+
 //Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
@@ -208,10 +253,20 @@ void setRow(uint8_t rowIdx){
 }
 
 int32_t phaseAcc2 = 0;
+static uint32_t readCtr = 0;
 void sampleISR() {
-  int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
-  Vout = Vout >> (8 - knobs[3].getRotation());
-  analogWrite(OUTR_PIN, Vout + 128);
+    if (readCtr == 256) {
+      readCtr = 0;
+      writeBuffer1 = !writeBuffer1;
+      xSemaphoreGiveFromISR(bufferSemaphore, NULL);
+    }
+      
+    if (writeBuffer1)
+      analogWrite(OUTR_PIN, reverbBuffer1[readCtr++]);
+    else
+      analogWrite(OUTR_PIN, reverbBuffer2[readCtr++]);
+  
+
 }
 
 void CAN_RX_ISR (void) {
@@ -224,6 +279,24 @@ void CAN_RX_ISR (void) {
 void decodeTask(void * pvParameters){
   while(1)
   xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+}
+
+void reverbTask(void * pvParameters) {
+    int32_t totalReverb = 0;
+
+    while(1){
+      xSemaphoreTake(bufferSemaphore, portMAX_DELAY);
+      
+      for (uint32_t writeCtr = 0; writeCtr < 256; writeCtr++){      
+        uint32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
+        Vout = (Vout >> (8 - knobs[3].getRotation()));
+        if (writeBuffer1)
+          reverbBuffer1[writeCtr] = Vout + 128;
+        else
+          reverbBuffer2[writeCtr] = Vout + 128;
+      }
+
+	}
 }
 
 void scanKeysTask(void * pvParameters) {
@@ -299,8 +372,6 @@ void scanKeysTask(void * pvParameters) {
             txmessage_nonvolatile[2] = TX_Message[2];
             
             CAN_TX(0x123, txmessage_nonvolatile);
-            
-            
           }
     }
     xSemaphoreGive(keyArrayMutex);
@@ -396,6 +467,8 @@ void setup() {
   Serial.println("Starting ...");
 
   keyArrayMutex = xSemaphoreCreateMutex();
+  bufferSemaphore = xSemaphoreCreateBinary();
+  xSemaphoreGive(bufferSemaphore);
 
   TaskHandle_t scanKeysHandle = NULL;
   xTaskCreate(
@@ -424,6 +497,15 @@ void setup() {
     NULL,			/* Parameter passed into the task */
     1,			/* Task priority */
     &displayUpdateHandle );  /* Pointer to store the task handle */
+
+    TaskHandle_t reverbHandle = NULL;
+  xTaskCreate(
+    reverbTask,		/* Function that implements the task */
+    "reverb",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    4,			/* Task priority */
+    &reverbHandle );  /* Pointer to store the task handle */
 
   vTaskStartScheduler();
 
