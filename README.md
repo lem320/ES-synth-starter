@@ -12,7 +12,10 @@
 # Features
 ## Polyphony
   ### Implementation
+  An identification of all the tasks that are performed by the system with their method of implementation, thread or interrupt
   ### Timings
+  A characterisation of each task with its theoretical minimum initiation interval and measured
+maximum execution time
 
 ## Envelope
   ### Implementation
