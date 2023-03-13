@@ -10,14 +10,13 @@
   [Handshaking and auto-detection](doc/handshaking.md)
 
 
-# Polyphony
+## Polyphony
 
- ## Envelope
+## Envelope
 
- ### Waveform Selection
+## Waveform Selection
 
-  
-### Low Frequency Oscillator
+## Low Frequency Oscillator
 
     
  
