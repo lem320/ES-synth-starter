@@ -2,7 +2,8 @@
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
-
+#define operation_mode 0 //sender, used operation mode 1 for reciever. As a sender, it should send the note numbers, octaves and if its pressed or released, but not actually play a sound. 
+                        // as a reciever, it should do be able to recieve information from the sender and its own keys, and play sounds accordingly.
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -52,7 +53,9 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 volatile uint8_t TX_Message[8] = {0};
 uint8_t RX_Message[8]={0};
 uint8_t keypressrelease[4] = {0} ;
-
+uint8_t keyboard_location = 0;
+uint32_t octaveindex;
+uint32_t octaveadd;
 QueueHandle_t msgInQ;
 QueueHandle_t msgOutQ;
 SemaphoreHandle_t CAN_TX_Semaphore;
@@ -98,7 +101,7 @@ class Note {
       envelopeState = 0;
     }
     
-    int32_t incrementAndGetPhaseAcc() {
+    uint32_t incrementAndGetPhaseAcc() {
       setEnvelope();
       if (envelope > 0) phaseAcc += stepSize;
       else phaseAcc = 0;
@@ -111,8 +114,8 @@ class Note {
     void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
 
   private:
-    int32_t stepSize;
-    int32_t phaseAcc;
+    uint32_t stepSize;
+    uint32_t phaseAcc;
     bool isPressed;
     float envelope;
     int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
@@ -151,12 +154,12 @@ class Octave {
     Octave() {};
     Octave(int octave) {
       for (int i=0; i<12; i++) 
-        notes[i] = new Note (i-9 + octave*12);
+        notes[i] = new Note (i-9 + (octave)*12);
     }
 
-    int32_t getNextTotalPhaseAcc() {
+    uint32_t getNextTotalPhaseAcc() {
       int totalPressed = 0;
-      int32_t totalPhaseAcc = 0;
+      uint32_t totalPhaseAcc = 0;
       for (int i=0; i<12; i++) {
       
         if (notes[i]->getIsPressed()) 
@@ -183,7 +186,8 @@ Knob knobs[4] = {
   {4,0,8}
 };
 
-Octave octave (0);
+Octave octave[8] {0,1,2,4,5,6,7};
+
 
 //Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
@@ -211,10 +215,29 @@ void setRow(uint8_t rowIdx){
 
 int32_t phaseAcc2 = 0;
 void sampleISR() {
-  int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
+  int32_t Vout = (octave[0].getNextTotalPhaseAcc() >> 24) - 128;
   Vout = Vout >> (8 - knobs[3].getRotation());
   analogWrite(OUTR_PIN, Vout + 128);
 }
+// void sampleISR() {
+  
+//   uint32_t count;
+//   uint32_t Vout;
+  
+//   for(int i = 0; i<1; i++){
+//     octaveindex = octave[i].getNextTotalPhaseAcc();
+//     if(octaveindex > 0){
+//       octaveadd = octaveindex + octaveadd;
+//       count++;
+//       // Serial.println(octaveindex);
+//     }
+//   }
+//   Vout = (octaveadd >> 24) - 128;
+//   Vout = Vout >> (8 - knobs[3].getRotation());
+//  // Serial.println(Vout);
+  
+//   analogWrite(OUTR_PIN, Vout + 128);
+// }
 
 void CAN_RX_ISR (void) {
 	uint8_t RX_Message_ISR[8];
@@ -228,6 +251,7 @@ void CAN_TX_ISR (void) {
 }
 
 void CAN_TX_Task (void * pvParameters) {
+
 	uint8_t msgOut[8];
 	while (1) {
 		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
@@ -236,17 +260,27 @@ void CAN_TX_Task (void * pvParameters) {
 	}
 }
 
-
 void decodeTask(void * pvParameters){
-  while(1)
+
+  while(1) {
   xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
   //if key is releasd, then set current step size to zero 
-  if(RX_Message[0] == 'R'){
+  
+  for (int i = 3; i < 6; i++){
 
-    octave.releaseNote(RX_Message[2]); //need to check this with luke 
+    // for (int j=0; j<4; j++){            
+    //     if (!(RX_Message[i] & (1 << j))){
+    //       octave[RX_Message[1]].pressNote(((i-3)*4)+j); 
+    //     }
+    //     else {
+
+    //       octave[RX_Message[1]].releaseNote(((i-3)*4)+j);
+    //     }
+                
+    // }
 
   }
-
+  }
 }
 
 void scanKeysTask(void * pvParameters) {
@@ -257,42 +291,64 @@ void scanKeysTask(void * pvParameters) {
   
   int notenumber = 0; 
   uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+  uint8_t boardlocation;
 
   while (1) {    
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+
+     uint8_t outBits[] = {0,0,0,1,1,1,1}; 
     
 
-    for (uint8_t i=0; i<5; i++) {
+    for (uint8_t i=0; i<7; i++) {
       setRow(i);
+      digitalWrite(OUT_PIN,outBits[i]); //Set value to latch in DFF
+      digitalWrite(REN_PIN,1);          //Enable selected row
       delayMicroseconds(3);
       uint8_t keyArrayPrev = keyArray[i];
+      uint8_t recieved_keypress;
       keyArray[i] = readCols();
-      //Serial.println(keyArrayPrev1 ^ keyArray[1]);
-      //Serial.println(keypressrelease); //remove this to make note number work again
+      digitalWrite(REN_PIN,0);          //Disable selected row
       keyxor = keyArrayPrev ^ keyArray[i];
-      
+      recieved_keypress = RX_Message[2];
       
       
       switch (i) {
-        case 0: case 1: case 2:
+        case 0: case 1: case 2: 
         
-          for (int j=0; j<4; j++){            
+          for (int j=0; j<4; j++){
+
+            
+
+            if(!(keyArray[5] & (1 << 3)) ){    //if dectected keyboard is west, set boardloction to 1
+                boardlocation = 1;
+                //Serial.println("west");
+              
+              }        
+              else if(!(keyArray[6] & (1 << 3))){   // if detected keyboard is east, set boardloction to 2
+               boardlocation = 0 ;
+               //Serial.println("east");
+            }
+            
+
+            
+
             if (!(keyArray[i] & (1 << j))){
               keypressrelease[j] = 1;
-              octave.pressNote(i*4+j);
+              
+              octave[boardlocation].pressNote((i*4)+j);
               notenumber = (i*4)+j;
             }
             else {
-              octave.releaseNote(i*4+j);
+              delayMicroseconds(3);
+              octave[boardlocation].releaseNote((i*4)+j);
               keypressrelease[j] = 0;
             }
             
           } 
           break;
         case 3: case 4:
-          Serial.print("");
           for (int j=0; j<2; j++) {
             if (
               ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
@@ -302,6 +358,23 @@ void scanKeysTask(void * pvParameters) {
               knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
           }
           break;
+
+          // case 5: case 6:
+          // for (int j = 3; j < 4; j++){
+          //   if((i == 5) & (j == 3) & !(keyArray[i] & (1 << j)) ){    //if dectected keyboard is west, set boardloction to 1
+          //       boardlocation = 1;
+          //       Serial.println("west");
+              
+          //     }        
+          //     else if((i == 6) & (j == 3) & !(keyArray[i] & (1 << j))){   // if detected keyboard is east, set boardloction to 2
+          //      boardlocation = 0 ;
+          //      Serial.println("east");
+          //   }
+          // }
+
+          // break;
+
+
       }
 
       if(keyxor != 0){
@@ -315,11 +388,19 @@ void scanKeysTask(void * pvParameters) {
             //Serial.println(jIndex);
 
             TX_Message[0] = jIndex;
-            TX_Message[1] = 4;
+            TX_Message[1] = 0;
             TX_Message[2] = notenumber;
+            TX_Message[3] = keyArray[0];
+            TX_Message[4] = keyArray[1];
+            TX_Message[5] = keyArray[2];
+            TX_Message[6] = keyboard_location;
             txmessage_nonvolatile[0] = TX_Message[0];
             txmessage_nonvolatile[1] = TX_Message[1];
             txmessage_nonvolatile[2] = TX_Message[2];
+            txmessage_nonvolatile[3] = TX_Message[3];
+            txmessage_nonvolatile[4] = TX_Message[4];
+            txmessage_nonvolatile[5] = TX_Message[5];
+            txmessage_nonvolatile[6] = TX_Message[6];
 
             xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
             //CAN_TX(0x123, txmessage_nonvolatile);
@@ -330,7 +411,6 @@ void scanKeysTask(void * pvParameters) {
     xSemaphoreGive(keyArrayMutex);
   }
 }
-
 
 void displayUpdateTask(void *pvParameters)
 {
@@ -440,7 +520,7 @@ void setup() {
     "decodeTask ",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    2,			/* Task priority */
     &decodeTaskHandle);  /* Pointer to store the task handle */    
 
     TaskHandle_t CAN_TX_TaskHandle = NULL;
@@ -449,7 +529,7 @@ void setup() {
     "CAN_TX_queue",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &CAN_TX_TaskHandle );  /* Pointer to store the task handle */
 
   TaskHandle_t displayUpdateHandle = NULL;
