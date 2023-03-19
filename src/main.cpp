@@ -56,6 +56,7 @@ uint8_t keypressrelease[4] = {0} ;
 uint8_t keyboard_location = 0;
 uint32_t octaveindex;
 uint32_t octaveadd;
+uint8_t boardlocation;
 QueueHandle_t msgInQ;
 QueueHandle_t msgOutQ;
 SemaphoreHandle_t CAN_TX_Semaphore;
@@ -215,7 +216,7 @@ void setRow(uint8_t rowIdx){
 
 int32_t phaseAcc2 = 0;
 void sampleISR() {
-  int32_t Vout = (octave[0].getNextTotalPhaseAcc() >> 24) - 128;
+  int32_t Vout = (octave[boardlocation].getNextTotalPhaseAcc() >> 24) - 128;
   Vout = Vout >> (8 - knobs[3].getRotation());
   analogWrite(OUTR_PIN, Vout + 128);
 }
@@ -291,7 +292,7 @@ void scanKeysTask(void * pvParameters) {
   
   int notenumber = 0; 
   uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
-  uint8_t boardlocation;
+  
 
   while (1) {    
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
@@ -322,13 +323,17 @@ void scanKeysTask(void * pvParameters) {
             
 
             if(!(keyArray[5] & (1 << 3)) ){    //if dectected keyboard is west, set boardloction to 1
-                boardlocation = 1;
+              boardlocation = 1;
                 //Serial.println("west");
               
               }        
-              else if(!(keyArray[6] & (1 << 3))){   // if detected keyboard is east, set boardloction to 2
-               boardlocation = 0 ;
+            else if(!(keyArray[6] & (1 << 3))){   // if detected keyboard is east, set boardloction to 2
+              boardlocation = 0 ;
                //Serial.println("east");
+            }
+
+            else{
+              boardlocation = 0;
             }
             
 
