@@ -53,10 +53,15 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 volatile uint8_t TX_Message[8] = {0};
 uint8_t RX_Message[8]={0};
 uint8_t keypressrelease[4] = {0} ;
-uint8_t keyboard_location = 0;
 uint32_t octaveindex;
 uint32_t octaveadd;
 uint8_t boardlocation;
+uint8_t firstkeyboard;
+uint8_t secondkeyboard;
+
+
+volatile uint8_t threekeyboards_check = 0;
+
 QueueHandle_t msgInQ;
 QueueHandle_t msgOutQ;
 SemaphoreHandle_t CAN_TX_Semaphore;
@@ -262,25 +267,13 @@ void CAN_TX_Task (void * pvParameters) {
 }
 
 void decodeTask(void * pvParameters){
-
   while(1) {
-  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
-  //if key is releasd, then set current step size to zero 
-  
-  for (int i = 3; i < 6; i++){
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
 
-    // for (int j=0; j<4; j++){            
-    //     if (!(RX_Message[i] & (1 << j))){
-    //       octave[RX_Message[1]].pressNote(((i-3)*4)+j); 
-    //     }
-    //     else {
+  //need to recieve the command if there is a three board keyboard... need to be careful in the case that it isnt a three board keyboard, because there is a chance it will get stuck
+  // threekeyboards_check = RX_Message[3];
 
-    //       octave[RX_Message[1]].releaseNote(((i-3)*4)+j);
-    //     }
-                
-    // }
 
-  }
   }
 }
 
@@ -300,7 +293,7 @@ void scanKeysTask(void * pvParameters) {
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
 
      uint8_t outBits[] = {0,0,0,1,1,1,1}; 
-    
+    boardlocation = 0;
 
     for (uint8_t i=0; i<7; i++) {
       setRow(i);
@@ -312,33 +305,93 @@ void scanKeysTask(void * pvParameters) {
       keyArray[i] = readCols();
       digitalWrite(REN_PIN,0);          //Disable selected row
       keyxor = keyArrayPrev ^ keyArray[i];
-      recieved_keypress = RX_Message[2];
+      //recieved_keypress = RX_Message[2];
+      uint8_t threekeyboards;
+      threekeyboards_check = RX_Message[3];
+
+
+      //Serial.println(threekeyboards_check);
       
+      // Serial.println(!(keyArray[5] & (1 << 3)));
+      // Serial.println(!(keyArray[6] & (1 << 3)));
       
       switch (i) {
         case 0: case 1: case 2: 
         
+          threekeyboards = (!(keyArray[5] & (1 << 3))) & (!(keyArray[6] & (1 << 3)));
+          Serial.println(threekeyboards_check);
           for (int j=0; j<4; j++){
-
-            
-
-            if(!(keyArray[5] & (1 << 3)) ){    //if dectected keyboard is west, set boardloction to 1
-              boardlocation = 1;
-                //Serial.println("west");
+            //check if its the middle keyboard:
+            if(threekeyboards){//if there is a keyboard to the left and right: !(keyArray[5] & (1 << 3)) & !(keyArray[6] & (1 << 3))
+              //Serial.println("middle");
+              TX_Message[3] = 1;  //send a message through the CAN bus to tell other keyboards that it is a three bord keyboard
+              txmessage_nonvolatile[3] = TX_Message[3];
               
-              }        
-            else if(!(keyArray[6] & (1 << 3))){   // if detected keyboard is east, set boardloction to 2
-              boardlocation = 0 ;
-               //Serial.println("east");
-            }
+              boardlocation = 1;  //set the octave to one.
+              //middlekeyboard = 1;
 
+            } 
             else{
-              boardlocation = 0;
+
+              TX_Message[3] = 0;  //send a message through the CAN bus to tell other keyboards that it is a three bord keyboard
+              txmessage_nonvolatile[3] = TX_Message[3];
             }
             
 
+            if (threekeyboards_check & ((!(keyArray[5] & (1 << 3))) ^ (!(keyArray[6] & (1 << 3))))) {  /// if there are three keyboards, and that you are not the middle keyboard...
+              //Serial.println("2");      
+
+              if(!(keyArray[5] & (1 << 3)) ){    // if there is a keyboard to your west, and you are not the middle, you are the outer right
+                boardlocation = 2;               // therefore you have an octave of 2
+                  //Serial.println("west");
+                
+                }        
+              else if(!(keyArray[6] & (1 << 3))){   // if detected keyboard is east, set boardloction to 0
+                boardlocation = 0 ;
+                secondkeyboard = 1;
+                //Serial.println("east");
+              }
+
+              // else{                    // dont' think that this is needed?
+              //   boardlocation = 0;
+              //   firstkeyboard = 0;
+              //   secondkeyboard = 0;
+              // }      
+
+            }           
+
+            // if there arent three keyboards, do this : 
+
+            else if(!(keyArray[5] & (1 << 3)) ^ !(keyArray[6] & (1 << 3))){  //!(keyArray[5] & (1 << 3)) ^ !(keyArray[6] & (1 << 3))
+
+              //Serial.println("3");     
+              if(!(keyArray[5] & (1 << 3)) ){    //if dectected keyboard is west, set boardloction to 1
+                boardlocation = 1;
+
+                  //Serial.println("west");
+                
+                }        
+              else if(!(keyArray[6] & (1 << 3))){   // if detected keyboard is east, set boardloction to 2
+                boardlocation = 0 ;
+            
+                //Serial.println("east");
+              }
+
+              else{
+                //Serial.println("4");     
+                boardlocation = 0;
+              
+              }
+            } 
+
             
 
+            
+         
+            
+
+            
+          
             if (!(keyArray[i] & (1 << j))){
               keypressrelease[j] = 1;
               
@@ -395,17 +448,13 @@ void scanKeysTask(void * pvParameters) {
             TX_Message[0] = jIndex;
             TX_Message[1] = 0;
             TX_Message[2] = notenumber;
-            TX_Message[3] = keyArray[0];
-            TX_Message[4] = keyArray[1];
-            TX_Message[5] = keyArray[2];
-            TX_Message[6] = keyboard_location;
+            
+            
             txmessage_nonvolatile[0] = TX_Message[0];
             txmessage_nonvolatile[1] = TX_Message[1];
             txmessage_nonvolatile[2] = TX_Message[2];
-            txmessage_nonvolatile[3] = TX_Message[3];
-            txmessage_nonvolatile[4] = TX_Message[4];
-            txmessage_nonvolatile[5] = TX_Message[5];
-            txmessage_nonvolatile[6] = TX_Message[6];
+            
+            
 
             xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
             //CAN_TX(0x123, txmessage_nonvolatile);
@@ -467,7 +516,7 @@ void setup() {
   msgInQ = xQueueCreate(36,8);
   msgOutQ = xQueueCreate(36,8);
 
-  CAN_Init(true);
+  CAN_Init(false);
   CAN_RegisterRX_ISR(CAN_RX_ISR);
   CAN_RegisterTX_ISR(CAN_TX_ISR);
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
