@@ -3,51 +3,233 @@
 #include <STM32FreeRTOS.h>
 #include <cmath>
 
-//Constants
-  const uint32_t interval = 100; //Display update interval
 
-  const float interuptFreq = 1000;
+// ------------ CONSTANTS ---------------
 
-  const double hz = 440;
-  const double freq_diff = pow(2, (1.0 / 12.0));
-  const double a = pow(2.0, 32) / interuptFreq;
-  const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-  #define PI 3.14159265358
+#define max_notes 1.0;
+#define displayLength 5
 
-  volatile uint8_t keyArray[7];
+const uint32_t interval = 100; //Display update interval
+const float interuptFreq = 22000;
+const double hz = 440;
+const double freq_diff = pow(2, (1.0 / 12.0));
+const double a = pow(2.0, 32) / interuptFreq;
+const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
-  SemaphoreHandle_t keyArrayMutex;
+const float envelopeGradient = (1.0/interuptFreq);
+const double b = pow(2.0, 31);
 
-  // Pin definitions
-  // Row select and enable
-  const int RA0_PIN = D3;
-  const int RA1_PIN = D6;
-  const int RA2_PIN = D12;
-  const int REN_PIN = A5;
+// Pin definitions
+// Row select and enable
+const int RA0_PIN = D3;
+const int RA1_PIN = D6;
+const int RA2_PIN = D12;
+const int REN_PIN = A5;
 
-  //Matrix input and output
-  const int C0_PIN = A2;
-  const int C1_PIN = D9;
-  const int C2_PIN = A6;
-  const int C3_PIN = D1;
-  const int OUT_PIN = D11;
+//Matrix input and output
+const int C0_PIN = A2;
+const int C1_PIN = D9;
+const int C2_PIN = A6;
+const int C3_PIN = D1;
+const int OUT_PIN = D11;
 
-  //Audio analogue out
-  const int OUTL_PIN = A4;
-  const int OUTR_PIN = A3;
+//Audio analogue out
+const int OUTL_PIN = A4;
+const int OUTR_PIN = A3;
 
-  //Joystick analogue in
-  const int JOYY_PIN = A0;
-  const int JOYX_PIN = A1;
+//Joystick analogue in
+const int JOYY_PIN = A0;
+const int JOYX_PIN = A1;
 
-  //Output multiplexer bits
-  const int DEN_BIT = 3;
-  const int DRST_BIT = 4;
-  const int HKOW_BIT = 5;
-  const int HKOE_BIT = 6;
+//Output multiplexer bits
+const int DEN_BIT = 3;
+const int DRST_BIT = 4;
+const int HKOW_BIT = 5;
+const int HKOE_BIT = 6;
 
-//Display driver object
-U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
+
+
+// ------------ DATA STRUCTURES ---------------
+
+uint32_t sine_table[501];
+
+class Note {
+  public:
+    Note() {};
+    Note(int power) {
+      frequency = hz*pow(freq_diff, power);
+      period = 1/frequency;
+      stepSize = frequency * a;
+      phaseAcc = 0;
+      isPressed = false;
+      envelope = 0;
+      envelopeState = 0;
+      envelopeActive = false;
+      time = 0;
+      wave = 2;
+    }
+    
+    uint32_t incrementAndGetPhaseAcc() {
+      if (isPressed || (envelope > 0 && envelopeActive)) nextPhaseAcc();
+      else {
+        phaseAcc = 0;
+        time = 0;
+      }
+      if (envelopeActive) {
+        setEnvelope();
+        return phaseAcc*envelope;
+      }
+      else return phaseAcc;
+    }
+
+    bool getIsPressed() { return isPressed || (envelope > 0 && envelopeActive); }
+    float getEnvelope() { return envelope; }
+
+    void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
+    void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
+
+    void envelopeActiveNotes(bool v) {
+      envelopeActive = v;
+    }
+
+  private:
+    uint32_t stepSize;
+    float time;
+    float frequency;
+    float period;
+    int wave; // 0 is sawtooth, 1 is square and 2 is sine
+
+    uint32_t phaseAcc;
+    bool isPressed;
+    float envelope;
+    int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
+    bool envelopeActive;
+
+    void nextPhaseAcc() {
+      if (wave == 0) phaseAcc += stepSize;
+      else if (wave == 2) {
+        phaseAcc = sine_table[(int)(frequency*time*500)];
+        time += envelopeGradient;
+        if (time >= period) time = 0;
+      }
+    }
+
+    void changeEnvelope(float incr) {
+      if (envelope <= 1 && envelope >= 0) envelope += incr*envelopeGradient;
+      if (envelope > 1) envelope = 1;
+      else if (envelope < 0) envelope = 0;
+    }
+    void setEnvelope() {
+      if (envelopeState == 0 && isPressed && envelope >= 1)  envelopeState = 1;
+      else if (envelopeState == 1 && isPressed && envelope <= 0.5) envelopeState = 2;
+      else if (!isPressed) envelopeState = 3;
+      else if (envelopeState == 3 && isPressed) envelopeState = 0;
+
+      switch (envelopeState)
+      {
+        case 0:
+          changeEnvelope(5);
+          break;
+
+        case 1: case 3:
+          changeEnvelope(-2);
+          break;
+        
+        default:
+          break;
+      }
+    }
+};
+
+class Octave {
+  public:
+    Octave() {};
+    Octave(int octave) {
+      for (int i=0; i<12; i++) 
+        notes[i] = new Note (i-9 + octave*12);
+    }
+
+    uint32_t getNextTotalPhaseAcc() {
+      int totalPressed = 0;
+      // float totalEnvelope = 0;
+      uint32_t totalPhaseAcc = 0;
+      for (int i=0; i<12; i++) 
+        if (notes[i]->getIsPressed()) 
+          totalPressed++;
+      for (int i=0; i<12; i++) 
+        if (notes[i]->getIsPressed()) {
+          
+          totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc() / totalPressed;
+          // totalEnvelope += notes[i]->getEnvelope();
+        }
+      // if (totalPhaseAcc > 0) Serial.println(totalPhaseAcc);
+      return (uint32_t)(totalPhaseAcc);
+    }
+
+    void envelopeActiveOctave(bool v) {
+      for (int i=0; i<12; i++) notes[i]->envelopeActiveNotes(v);
+    }
+
+    void pressNote(int noteIndex) { notes[noteIndex]->pressed(); }
+    void releaseNote(int noteIndex) { notes[noteIndex]->released(); }
+
+  private:
+    Note* notes[12];
+};
+
+Octave octave (0);
+
+class DisplayItem {
+  public:
+    DisplayItem() {}
+    DisplayItem(char* pName, char* pLevels[2], int pCurrentLevel) {//std::function<void(int)> function) {
+      name = pName;
+      levels[0] = pLevels[0];
+      levels[1] = pLevels[1];
+      currentLevel = pCurrentLevel;
+      // type = pType;
+      // function(currentLevel);
+    }
+
+    int changeLevel(int inc) {
+      currentLevel += inc;
+      if (currentLevel > 1) currentLevel = 1;
+      else if (currentLevel < 0) currentLevel = 0;
+      // function(currentLevel);
+      return currentLevel;
+    }
+
+    // char* getDisplayString() {
+    //   char* out = new char[50];
+    //   sprintf(out, "%s: %s",name,levels[currentLevel]);
+    //   return out;
+    // }
+
+    char* getName() {
+      return name;
+    }
+    char* getCurrentLevel() {
+      return levels[currentLevel];
+    }
+    int getCurrentLevelInt() {
+      return currentLevel;
+    }
+
+  private:
+    char* name;
+    char* levels[2];
+    int currentLevel;
+    // int type;
+    // std::function<void(int)> function;
+
+    // void envelopeActive(int level) {
+    //   // Serial.println("hi");
+      
+    // }
+    // void filteringActive(int level) {
+    //   // octave.envelopeActiveOctave(level == 1);
+    // }
+};
 
 class Knob {
   public:
@@ -76,125 +258,46 @@ class Knob {
     int upperLimit;
 };
 
-const float envelopeGradient = (1.0/interuptFreq);
-const double b = pow(2.0, 31);
 
-int32_t sine_table[10001];
+// ------------ MAIN CODE ---------------
 
-class Note {
-  public:
-    Note() {};
-    Note(int power) {
-      frequency = hz*pow(freq_diff, power);
-      // Serial.println(frequency);
-      stepSize = frequency * a;
-      phaseAcc = 0;
-      isPressed = false;
-      envelope = 0;
-      envelopeState = 0;
-      time = 0;
-      wave = 2;
-    }
-    
-    int32_t incrementAndGetPhaseAcc() {
-      setEnvelope();
-      if (isPressed || envelope > 0) nextPhaseAcc();
-      else {
-        phaseAcc = 0;
-        time = 0;
-      }
-      return phaseAcc*envelope;
-      // return phaseAcc;
-    }
 
-    bool getIsPressed() { return isPressed || (envelope > 0); }
-
-    void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
-    void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
-
-  private:
-    int32_t stepSize;
-    float time;
-    float frequency;
-    int wave; // 0 is sawtooth, 1 is square and 2 is sine
-
-    uint32_t phaseAcc;
-    bool isPressed;
-    float envelope;
-    int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
-
-    void nextPhaseAcc() {
-      if (wave == 0) phaseAcc += stepSize;
-      else if (wave == 2) {
-        phaseAcc = sine_table[(int)(frequency*time*10000)];
-        time += envelopeGradient;
-        if (time >= (1.0/frequency)) time = 0;
-      }
-    }
-
-    void changeEnvelope(float incr) {
-      if (envelope <= 1 && envelope >= 0) envelope += incr*envelopeGradient;
-      if (envelope > 1) envelope = 1;
-      else if (envelope < 0) envelope = 0;
-    }
-    void setEnvelope() {
-      if (envelopeState == 0 && isPressed && envelope >= 1)  envelopeState = 1;
-      else if (envelopeState == 1 && isPressed && envelope <= 0.5) envelopeState = 2;
-      else if (!isPressed) envelopeState = 3;
-      else if (envelopeState == 3 && isPressed) envelopeState = 0;
-
-      switch (envelopeState)
-      {
-        case 0:
-          changeEnvelope(5);
-          break;
-
-        case 1: case 3:
-          changeEnvelope(-2);
-          break;
-        
-        default:
-          break;
-      }
-
-    }
-};
-
-class Octave {
-  public:
-    Octave() {};
-    Octave(int octave) {
-      for (int i=0; i<12; i++) 
-        notes[i] = new Note (i-9 + octave*12);
-    }
-
-    int32_t getNextTotalPhaseAcc() {
-      int totalPressed = 0;
-      int32_t totalPhaseAcc = 0;
-      for (int i=0; i<12; i++) 
-        if (notes[i]->getIsPressed()) {
-          totalPressed++;
-          totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc();
-        }
-      return totalPhaseAcc/totalPressed;
-    }
-
-    void pressNote(int noteIndex) { notes[noteIndex]->pressed(); }
-    void releaseNote(int noteIndex) { notes[noteIndex]->released(); }
-
-  private:
-    Note* notes[12];
-};
+volatile uint8_t keyArray[7];
+SemaphoreHandle_t keyArrayMutex;
+U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
+int currentMenuRotation = 0;
 
 // Setip Knobs
 Knob knobs[4] = {
+  {0,0,displayLength-1},
   {0,0,10},
-  {0,0,10},
-  {0,0,10},
-  {4,0,8}
+  {0,0,2},
+  {3,0,8}
 };
 
-Octave octave (0);
+
+void changingLevel(int currentLevel, int type) {
+  Serial.print(currentLevel);
+  Serial.print(" ");
+  Serial.println(type);
+  switch (type) {
+    case 0:
+      octave.envelopeActiveOctave(currentLevel == 1);
+      break;
+    default:
+      break;
+  } //getCurrentLevel()
+}
+
+char* boolLevels[2] = {(char*)"Off",(char*)"On"};
+DisplayItem displayItems[displayLength] = {
+  {(char*)"Envelope",boolLevels,1},
+  {(char*)"Filtering",boolLevels,0},
+  {(char*)"Item 1",boolLevels,0},
+  {(char*)"Item 2",boolLevels,0},
+  {(char*)"Item 3",boolLevels,0}
+};
+
 
 //Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
@@ -220,18 +323,12 @@ void setRow(uint8_t rowIdx){
   digitalWrite(REN_PIN,HIGH);
 }
 
-int32_t phaseAcc2 = 0;
 void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
-
-
   Vout = Vout >> (8 - knobs[3].getRotation());
-  Serial.println(Vout);
-
-  
+  // Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
-
 
 void scanKeysTask(void * pvParameters) {
   int32_t phaseAcc[5];
@@ -273,7 +370,6 @@ void scanKeysTask(void * pvParameters) {
   }
 }
 
-
 void displayUpdateTask(void *pvParameters)
 {
       const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
@@ -284,18 +380,90 @@ void displayUpdateTask(void *pvParameters)
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
         u8g2.clearBuffer();
-        u8g2.setFont(u8g2_font_ncenB08_tr);
-        u8g2.drawStr(2, 10, "Hello World!");
-        
-        u8g2.setCursor(2,20);
-        u8g2.print(knobs[0].getRotation());
-        u8g2.setCursor(12,20);
-        u8g2.print(knobs[1].getRotation());
-        u8g2.setCursor(22,20);
-        u8g2.print(knobs[2].getRotation());
-        u8g2.setCursor(32,20);
-        u8g2.print(knobs[3].getRotation());
 
+
+        // VOLUME
+        u8g2.setFont(u8g2_font_open_iconic_play_1x_t);
+        int volume = knobs[3].getRotation();
+        if (volume > 4) u8g2.drawUTF8(110,10,"\u004F");
+        else if (volume == 0) u8g2.drawUTF8(108,10,"\u0051");
+        else u8g2.drawUTF8(109,10,"\u0050");
+        // char* volumeString = new char[8];
+        // for (int i=0; i<volume; i++) strcat(volumeString,"|");
+        // u8g2.drawStr(2,20,volumeString);
+
+        u8g2.setFont(u8g2_font_6x10_tf);
+        u8g2.setCursor(122,10);
+        u8g2.print(volume);
+
+        // WAVE TYPE
+        int wave = knobs[2].getRotation();
+        
+        u8g2.setFont(u8g2_font_8x13_t_symbols);
+        switch (wave) {
+          case 0:
+            u8g2.drawStr(115,20,"/");
+            u8g2.drawStr(119,20,"|");
+            break;
+          case 1:
+            u8g2.drawStr(108,21,"|");
+            u8g2.drawStr(112,12,"_");
+            u8g2.drawStr(115,21,"|");
+            u8g2.drawStr(119,20,"_");
+            u8g2.drawStr(122,21,"|");
+            break;
+          case 2:
+            u8g2.drawUTF8(111,20,"\u25E0");
+            u8g2.drawUTF8(119,20,"\u25E1");
+            break;
+          default:
+            break;
+        }
+        // u8g2.drawUTF8(111,20,"\u25E0");
+        // u8g2.drawUTF8(119,20,"\u25E1");
+
+        u8g2.setFont(u8g2_font_6x10_tf);
+
+        // MENU
+        int indexes[2];
+        int cursor;
+        int menuIndex = knobs[0].getRotation();
+        int incIndex = knobs[1].getRotation();
+
+        if (currentMenuRotation != incIndex) {
+          int newLevel = displayItems[menuIndex].changeLevel(incIndex - currentMenuRotation);
+          changingLevel(newLevel,menuIndex);
+          currentMenuRotation = incIndex;
+        }
+
+        if (menuIndex == 0) {
+          indexes[0] = 0;
+          indexes[1] = 1;
+          // indexes[2] = 2;
+          cursor = 1;
+        } else if (menuIndex == displayLength-1) {
+          indexes[0] = displayLength-2;
+          indexes[1] = displayLength-1;
+          // indexes[2] = displayLength-1;
+          cursor = 2;
+        } else {
+          // indexes[0] = menuIndex-1;
+          indexes[0] = menuIndex;
+          indexes[1] = menuIndex+1;
+          cursor = 1;
+        }
+
+        for (int i=0; i<2; i++) {
+          u8g2.drawStr(12, 10*(i+1), displayItems[indexes[i]].getName());
+          u8g2.drawStr(72, 10*(i+1), displayItems[indexes[i]].getCurrentLevel());
+        }
+        u8g2.setFont(u8g2_font_open_iconic_arrow_1x_t);
+        u8g2.drawUTF8(2,10*cursor,"\u0042");
+        
+        
+        u8g2.setFont(u8g2_font_6x10_tf);
+
+        int count = 0;
         xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
         for (int i = 0; i < 3; i++)
         {
@@ -303,8 +471,9 @@ void displayUpdateTask(void *pvParameters)
           for (int j = 0; j < 4; j++)
             if (!(keyArray[i] & (1 << j)))
             {
-              u8g2.drawStr(2, 30, notes[(i * 4) + j]);
-              u8g2.setCursor(2, 30);
+              u8g2.drawStr(2+15*count, 30, notes[(i * 4) + j]);
+              // u8g2.setCursor(2+40*count, 30);
+              count++;
             }
         }
         xSemaphoreGive(keyArrayMutex);
@@ -317,8 +486,15 @@ void displayUpdateTask(void *pvParameters)
 void setup() {
   // put your setup code here, to run once:
 
-  for (int index = 0; index < 10001; index++) {
-      sine_table[index] = b*(sin(2*PI * index / 10000.0)+1);
+  // fill_sintable();
+  for (int index = 0; index < 501; index++) {
+    sine_table[index] = b*(sin(2*PI * index / 500.0)+1);
+  }
+
+  // Init display items
+  for (int i=0; i<displayLength; i++){
+    Serial.println(i);
+    changingLevel(displayItems[i].getCurrentLevelInt(), i);
   }
 
   //Set pin directions
@@ -343,6 +519,7 @@ void setup() {
   delayMicroseconds(2);
   setOutMuxBit(DRST_BIT, HIGH);  //Release display logic reset
   u8g2.begin();
+  u8g2.enableUTF8Print();
   setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
 
   TIM_TypeDef *Instance = TIM1;
@@ -354,6 +531,8 @@ void setup() {
   //Initialise UART
   Serial.begin(115200);
   Serial.println("Starting ...");
+
+
 
   keyArrayMutex = xSemaphoreCreateMutex();
 
