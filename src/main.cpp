@@ -10,7 +10,7 @@
 #define displayLength 5
 
 const uint32_t interval = 100; //Display update interval
-const float interuptFreq = 22000;
+const float interuptFreq = 1000;
 const double hz = 440;
 const double freq_diff = pow(2, (1.0 / 12.0));
 const double a = pow(2.0, 32) / interuptFreq;
@@ -46,7 +46,8 @@ const int DEN_BIT = 3;
 const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
-
+uint8_t modeDecrease;
+uint32_t tempphaseAcc;
 
 
 // ------------ DATA STRUCTURES ---------------
@@ -66,7 +67,7 @@ class Note {
       envelopeState = 0;
       envelopeActive = false;
       time = 0;
-      wave = 2;
+      wave = 3;
     }
     
     uint32_t incrementAndGetPhaseAcc() {
@@ -106,14 +107,58 @@ class Note {
     bool envelopeActive;
 
     void nextPhaseAcc() {
+      uint32_t oldphaseAcc;
+      
+
       if (wave == 0) phaseAcc += stepSize;
       else if (wave == 2) {
         phaseAcc = sine_table[(int)(frequency*time*500)];
         time += envelopeGradient;
+      
         if (time >= period) time = 0;
       }
+
+      else if (wave == 1) { 
+        
+        if ((phaseAcc + stepSize > oldphaseAcc) && !(modeDecrease)) {
+
+            
+            oldphaseAcc = phaseAcc;
+            phaseAcc += stepSize; // increasing phaseAcc until before it overflows  by reaching its maximum value. From this point, decrease phaseAcc
+
+        }
+        else {          
+                              //once it is about to overflow, set, modeDecrease to 1 to change the state to decrease the phaseAcc.
+          modeDecrease = 1;
+
+        }
+        if( (modeDecrease  == 1) && ((phaseAcc - stepSize) < (oldphaseAcc))) {    //if phaseAcc hasnt yet gone back down to zero, and modeDecrease is activated, decrease the phaseAcc.
+          oldphaseAcc = phaseAcc;
+          phaseAcc -= stepSize;
+        }
+        else{
+            modeDecrease =  0; 
+            //At this point the phaseAcc is set
+
+        }
+
+
     }
 
+  else if (wave == 3){
+    
+
+            
+            //oldphaseAcc = tempphaseAcc;
+            
+            tempphaseAcc += stepSize; 
+            phaseAcc  = (tempphaseAcc & (1 << 31));
+
+ 
+
+  }
+
+  }
     void changeEnvelope(float incr) {
       if (envelope <= 1 && envelope >= 0) envelope += incr*envelopeGradient;
       if (envelope > 1) envelope = 1;
@@ -326,12 +371,11 @@ void setRow(uint8_t rowIdx){
 void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
   Vout = Vout >> (8 - knobs[3].getRotation());
-  // Serial.println(Vout+128);
+   Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
 void scanKeysTask(void * pvParameters) {
-  int32_t phaseAcc[5];
 
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
