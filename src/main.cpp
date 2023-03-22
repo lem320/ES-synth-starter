@@ -1,23 +1,10 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h>
-#include <cmath>
+#include <ES_CAN.h>
 
 
 // ------------ CONSTANTS ---------------
-
-#define max_notes 1.0;
-#define displayLength 5
-
-const uint32_t interval = 100; //Display update interval
-const float interuptFreq = 22000;
-const double hz = 440;
-const double freq_diff = pow(2, (1.0 / 12.0));
-const double a = pow(2.0, 32) / interuptFreq;
-const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-
-const float envelopeGradient = (1.0/interuptFreq);
-const double b = pow(2.0, 31);
 
 // Pin definitions
 // Row select and enable
@@ -48,25 +35,58 @@ const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
 
+#define max_notes 1.0;
+#define displayLength 5
+
+const float interuptFreq = 22000;
+const double hz = 440;
+const double freq_diff = pow(2, (1.0 / 12.0));
+const double a = pow(2.0, 32) / interuptFreq;
+const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+const float envelopeGradient = (1.0/interuptFreq);
+const double b = pow(2.0, 31);
+
+
+//CAN
+volatile uint8_t TX_Message[8] = {0};
+uint8_t RX_Message[8]={0};
+uint8_t keypressrelease[4] = {0} ;
+uint32_t octaveindex;
+uint32_t octaveadd;
+uint8_t boardlocation;
+uint8_t firstkeyboard;
+uint8_t secondkeyboard;
+
+
+volatile uint8_t threekeyboards_check = 0;
+
+QueueHandle_t msgInQ;
+QueueHandle_t msgOutQ;
+SemaphoreHandle_t CAN_TX_Semaphore;
+
 
 // ------------ DATA STRUCTURES ---------------
 
-uint32_t sine_table[501];
+uint32_t sine_table[5001];
 
 class Note {
   public:
     Note() {};
     Note(int power) {
-      frequency = hz*pow(freq_diff, power);
-      period = 1/frequency;
-      stepSize = frequency * a;
+      for (int i=0; i<3; i++) {
+        frequencies[i] = hz*pow(freq_diff, power+(i-1)*12);
+        periods[i] = 1/frequencies[i];
+        stepSizes[i] = frequencies[i] * a;
+      }
+      setTone(-1);
       phaseAcc = 0;
       isPressed = false;
       envelope = 0;
       envelopeState = 0;
       envelopeActive = false;
       time = 0;
-      wave = 2;
+      wave = 0;
     }
     
     uint32_t incrementAndGetPhaseAcc() {
@@ -91,8 +111,21 @@ class Note {
     void envelopeActiveNotes(bool v) {
       envelopeActive = v;
     }
+    void changeWave(int pWave) {
+      wave = pWave;
+    } 
+
+    void setTone(int octave) {
+      stepSize = stepSizes[octave+1];
+      frequency = frequencies[octave+1];
+      period = periods[octave+1];
+    }
 
   private:
+    float frequencies[3];
+    float periods[3];
+    uint32_t stepSizes[3];
+
     uint32_t stepSize;
     float time;
     float frequency;
@@ -108,7 +141,7 @@ class Note {
     void nextPhaseAcc() {
       if (wave == 0) phaseAcc += stepSize;
       else if (wave == 2) {
-        phaseAcc = sine_table[(int)(frequency*time*500)];
+        phaseAcc = sine_table[(int)(frequency*time*50)];
         time += envelopeGradient;
         if (time >= period) time = 0;
       }
@@ -144,40 +177,51 @@ class Note {
 class Octave {
   public:
     Octave() {};
-    Octave(int octave) {
+    Octave(int pOctave) {
+      octave = pOctave;
       for (int i=0; i<12; i++) 
-        notes[i] = new Note (i-9 + octave*12);
+        notes[i] = new Note (i-9);
     }
 
     uint32_t getNextTotalPhaseAcc() {
       int totalPressed = 0;
-      // float totalEnvelope = 0;
       uint32_t totalPhaseAcc = 0;
       for (int i=0; i<12; i++) 
         if (notes[i]->getIsPressed()) 
           totalPressed++;
       for (int i=0; i<12; i++) 
-        if (notes[i]->getIsPressed()) {
-          
+        if (notes[i]->getIsPressed()) 
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc() / totalPressed;
-          // totalEnvelope += notes[i]->getEnvelope();
-        }
-      // if (totalPhaseAcc > 0) Serial.println(totalPhaseAcc);
+
       return (uint32_t)(totalPhaseAcc);
     }
 
     void envelopeActiveOctave(bool v) {
       for (int i=0; i<12; i++) notes[i]->envelopeActiveNotes(v);
     }
+    void changeWaveOctave(int pWave) {
+      for (int i=0; i<12; i++) notes[i]->changeWave(pWave);
+    }
+    int getOctave() {
+      return octave;
+    }
 
     void pressNote(int noteIndex) { notes[noteIndex]->pressed(); }
     void releaseNote(int noteIndex) { notes[noteIndex]->released(); }
 
+    void changeOctave(int pOctave) {
+      octave = pOctave;
+      Serial.println(octave);
+      for (int i=0; i<12; i++) 
+        notes[i]->setTone(octave); // +octave*12
+    }
+
   private:
     Note* notes[12];
+    int octave;
 };
 
-Octave octave (0);
+Octave octave (-1);
 
 class DisplayItem {
   public:
@@ -219,16 +263,6 @@ class DisplayItem {
     char* name;
     char* levels[2];
     int currentLevel;
-    // int type;
-    // std::function<void(int)> function;
-
-    // void envelopeActive(int level) {
-    //   // Serial.println("hi");
-      
-    // }
-    // void filteringActive(int level) {
-    //   // octave.envelopeActiveOctave(level == 1);
-    // }
 };
 
 class Knob {
@@ -275,11 +309,10 @@ Knob knobs[4] = {
   {3,0,8}
 };
 
+bool keyboardIsMaster = false;
+int volumeSent = 0;
 
 void changingLevel(int currentLevel, int type) {
-  Serial.print(currentLevel);
-  Serial.print(" ");
-  Serial.println(type);
   switch (type) {
     case 0:
       octave.envelopeActiveOctave(currentLevel == 1);
@@ -299,7 +332,41 @@ DisplayItem displayItems[displayLength] = {
 };
 
 
-//Function to set outputs using key matrix
+// CAN FUNCITONS
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+}
+
+void CAN_TX_ISR (void) {
+	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+}
+
+void CAN_TX_Task (void * pvParameters) {
+
+	uint8_t msgOut[8];
+	while (1) {
+		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
+}
+
+void decodeTask(void * pvParameters){
+  while(1) {
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
+
+  //need to recieve the command if there is a three board keyboard... need to be careful in the case that it isnt a three board keyboard, because there is a chance it will get stuck
+  // threekeyboards_check = RX_Message[3];
+
+  }
+}
+
+
+
+
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
       digitalWrite(RA0_PIN, bitIdx & 0x01);
@@ -325,27 +392,36 @@ void setRow(uint8_t rowIdx){
 
 void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
-  Vout = Vout >> (8 - knobs[3].getRotation());
+  int volume = (keyboardIsMaster) ? knobs[3].getRotation() : volumeSent;
+  Vout = Vout >> (8 - volume);
   // Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
 void scanKeysTask(void * pvParameters) {
-  int32_t phaseAcc[5];
-
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
+
+  int8_t keyxor;
+  int notenumber = 0; 
+  uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+
+  bool leftKeyboard, rightKeyboard;
+  // int threeKeyboardCheck = 0; // 0 means unknown, 1 means false and 2 means true
+
 
   while (1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    for (uint8_t i=0; i<5; i++) {
+    for (uint8_t i=0; i<7; i++) {
       setRow(i);
       delayMicroseconds(3);
       
       uint8_t keyArrayPrev = keyArray[i];
       keyArray[i] = readCols();
+
+      // threeKeyboardCheck = RX_Message[3];
 
       switch (i) {
         case 0: case 1: case 2:
@@ -354,7 +430,6 @@ void scanKeysTask(void * pvParameters) {
             else octave.releaseNote(i*4+j);
           break;
         case 3: case 4:
-          // Serial.print("");
           for (int j=0; j<2; j++) {
             if (
               ( (keyArrayPrev & (1 << 2*j)) ^ (keyArray[i] & (1 << 2*j)) ) == (1 << 2*j) &&
@@ -364,12 +439,151 @@ void scanKeysTask(void * pvParameters) {
               knobs[ (i-4)*-2 + 1 + (j*-1) ].changeRotation( (((keyArray[i] & (1 << 2*j)) >> 2*j) ^ ((keyArray[i] & (1 << (2*j+1))) >> (2*j+1))) ? 1 : -1 );
           }
           break;
+        case 5:
+          leftKeyboard = keyArray[i] & (1 << 3);
+          break;
+        case 6:
+          rightKeyboard = keyArray[i] & (1 << 3);
+          break;
       }
     }
+
+
     xSemaphoreGive(keyArrayMutex);
+
+    int newMaster = 0;
+
+    // __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);
+
+
+    if (leftKeyboard) __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
+    else __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);
+
+    bool changed = false;
+
+    if (!leftKeyboard && !rightKeyboard) {
+      TX_Message[0] = 1;
+      txmessage_nonvolatile[0] = TX_Message[0];
+      
+      TX_Message[1] = RX_Message[1];
+      txmessage_nonvolatile[1] = TX_Message[1];
+      TX_Message[2] = RX_Message[2];
+      txmessage_nonvolatile[2] = TX_Message[2];
+      TX_Message[3] = RX_Message[3];
+      txmessage_nonvolatile[3] = TX_Message[3];
+      changed = true;
+    }
+
+    if (keyboardIsMaster & !rightKeyboard) {
+      TX_Message[0] = RX_Message[0];
+      txmessage_nonvolatile[0] = TX_Message[0];
+
+      TX_Message[1] = knobs[3].getRotation();
+      txmessage_nonvolatile[1] = TX_Message[1];
+
+      TX_Message[2] = knobs[2].getRotation();
+      txmessage_nonvolatile[2] = TX_Message[2];
+
+      TX_Message[3] = displayItems[0].getCurrentLevelInt();
+      txmessage_nonvolatile[3] = TX_Message[3];
+
+      changed = true;
+    } else if (!leftKeyboard) {
+      volumeSent = RX_Message[1];
+      octave.changeWaveOctave(RX_Message[2]);
+      changingLevel(RX_Message[3],0);
+
+      // Serial.print("rx ");
+      Serial.println(RX_Message[0]);
+      int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
+                         ( (RX_Message[0] == 0) ? 0 : 1 );
+      if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
+    }
+    Serial.println(octave.getOctave());
+
+    if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+
+
+
+    // if (keyboardIsMaster && RX_Message[0] == 2 && (leftKeyboard || rightKeyboard)) {
+    //   TX_Message[0] = 1;
+    //   txmessage_nonvolatile[0] = TX_Message[0];
+    // }
+
+    // if (keyboardIsMaster && RX_Message[1] == 1) __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);;
+
+    // // If MIDDLE keyboard or no other keyboards attached, go straight to MASTER
+    // if ( (!leftKeyboard && !rightKeyboard) || (leftKeyboard && rightKeyboard) ) {
+    //   __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
+    //   newMaster = 1;
+    // }
+    // else {
+    //   int threeKeyboardCheck = RX_Message[0];
+
+    //   // If threeKeyboardCheck uninitialised, wait and see if a MIDDLE keyboard sets it
+    //   if (threeKeyboardCheck == 0) {
+    //     delayMicroseconds(100000);
+    //     threeKeyboardCheck = RX_Message[0];
+    //   }
+    //   // If threeKeyboardCheck still uninitialised or if there are not three keyboards and we are the left-most keyboard, we are MASTER
+    //   if (threeKeyboardCheck != 2 && leftKeyboard) {
+        
+    //     if (!keyboardIsMaster) newMaster = 1;
+    //     __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
+    //   }
+
+    // }
+
+    // // Serial.print(" ");
+    // // Serial.print(keyboardIsMaster);
+    // // Serial.print(" ");
+    // // Serial.print(leftKeyboard);
+    // // Serial.print(" ");
+    // // Serial.print(rightKeyboard);
+    // // Serial.print(" ");
+    // // Serial.print(RX_Message[0]);
+    // // Serial.print(" ");
+    // // Serial.println(RX_Message[1]);
+
+
+    // // if (!keyboardIsMaster) {
+    // //   if (threeKeyboardCheck == 0) delayMicroseconds(1000);
+    // //   if (RX_Message[0] == 0 && !rightKeyboard) keyboardIsMaster = true;
+    // // }
+
+
+    // if (RX_Message[1] == 1 && keyboardIsMaster) __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
+
+    // if (leftKeyboard && rightKeyboard) {
+    //   // CAN_Init(false);
+    //   if (keyboardIsMaster) {
+    //     if (!leftKeyboard && !rightKeyboard) {
+    //       TX_Message[0] = 2;
+    //       txmessage_nonvolatile[0] = TX_Message[0];
+    //     } else {
+    //       TX_Message[0] = 1;
+    //       txmessage_nonvolatile[0] = TX_Message[0];
+    //     }
+    //     TX_Message[1] = newMaster;
+    //     txmessage_nonvolatile[1] = TX_Message[1];
+    //     TX_Message[2] = knobs[3].getRotation();
+    //     txmessage_nonvolatile[2] = TX_Message[2];
+
+    //     xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+    //   } else {
+    //     volumeSent = RX_Message[2];
+
+    //     int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0
+    //                         : ( (!leftKeyboard) ? 1 : -1 );
+    //     if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
+    //   }
+    // } else {
+    //   // CAN_Init(true);
+    // }
+
   }
 }
-
+int currentWave = 0;
 void displayUpdateTask(void *pvParameters)
 {
       const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
@@ -378,89 +592,95 @@ void displayUpdateTask(void *pvParameters)
       while (1)
       {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
         u8g2.clearBuffer();
+        if (keyboardIsMaster) {
+          
 
 
-        // VOLUME
-        u8g2.setFont(u8g2_font_open_iconic_play_1x_t);
-        int volume = knobs[3].getRotation();
-        if (volume > 4) u8g2.drawUTF8(110,10,"\u004F");
-        else if (volume == 0) u8g2.drawUTF8(108,10,"\u0051");
-        else u8g2.drawUTF8(109,10,"\u0050");
-        // char* volumeString = new char[8];
-        // for (int i=0; i<volume; i++) strcat(volumeString,"|");
-        // u8g2.drawStr(2,20,volumeString);
+          // VOLUME
+          u8g2.setFont(u8g2_font_open_iconic_play_1x_t);
+          int volume = knobs[3].getRotation();
+          if (volume > 4) u8g2.drawUTF8(110,10,"\u004F");
+          else if (volume == 0) u8g2.drawUTF8(108,10,"\u0051");
+          else u8g2.drawUTF8(109,10,"\u0050");
+          // char* volumeString = new char[8];
+          // for (int i=0; i<volume; i++) strcat(volumeString,"|");
+          // u8g2.drawStr(2,20,volumeString);
 
-        u8g2.setFont(u8g2_font_6x10_tf);
-        u8g2.setCursor(122,10);
-        u8g2.print(volume);
+          u8g2.setFont(u8g2_font_6x10_tf);
+          u8g2.setCursor(122,10);
+          u8g2.print(volume);
 
-        // WAVE TYPE
-        int wave = knobs[2].getRotation();
-        
-        u8g2.setFont(u8g2_font_8x13_t_symbols);
-        switch (wave) {
-          case 0:
-            u8g2.drawStr(115,20,"/");
-            u8g2.drawStr(119,20,"|");
-            break;
-          case 1:
-            u8g2.drawStr(108,21,"|");
-            u8g2.drawStr(112,12,"_");
-            u8g2.drawStr(115,21,"|");
-            u8g2.drawStr(119,20,"_");
-            u8g2.drawStr(122,21,"|");
-            break;
-          case 2:
-            u8g2.drawUTF8(111,20,"\u25E0");
-            u8g2.drawUTF8(119,20,"\u25E1");
-            break;
-          default:
-            break;
+          // WAVE TYPE
+          int wave = knobs[2].getRotation();
+          if (wave != currentWave) {
+            octave.changeWaveOctave(wave);
+            currentWave = wave;
+          }
+          u8g2.setFont(u8g2_font_8x13_t_symbols);
+          switch (wave) {
+            case 0:
+              u8g2.drawStr(115,20,"/");
+              u8g2.drawStr(119,20,"|");
+              break;
+            case 1:
+              u8g2.drawStr(108,21,"|");
+              u8g2.drawStr(112,12,"_");
+              u8g2.drawStr(115,21,"|");
+              u8g2.drawStr(119,20,"_");
+              u8g2.drawStr(122,21,"|");
+              break;
+            case 2:
+              u8g2.drawUTF8(111,20,"\u25E0");
+              u8g2.drawUTF8(119,20,"\u25E1");
+              break;
+            default:
+              break;
+          }
+          // u8g2.drawUTF8(111,20,"\u25E0");
+          // u8g2.drawUTF8(119,20,"\u25E1");
+
+          u8g2.setFont(u8g2_font_6x10_tf);
+
+          // MENU
+          int indexes[2];
+          int cursor;
+          int menuIndex = knobs[0].getRotation();
+          int incIndex = knobs[1].getRotation();
+
+          if (currentMenuRotation != incIndex) {
+            int newLevel = displayItems[menuIndex].changeLevel(incIndex - currentMenuRotation);
+            changingLevel(newLevel,menuIndex);
+            currentMenuRotation = incIndex;
+          }
+
+          if (menuIndex == 0) {
+            indexes[0] = 0;
+            indexes[1] = 1;
+            // indexes[2] = 2;
+            cursor = 1;
+          } else if (menuIndex == displayLength-1) {
+            indexes[0] = displayLength-2;
+            indexes[1] = displayLength-1;
+            // indexes[2] = displayLength-1;
+            cursor = 2;
+          } else {
+            // indexes[0] = menuIndex-1;
+            indexes[0] = menuIndex;
+            indexes[1] = menuIndex+1;
+            cursor = 1;
+          }
+
+          for (int i=0; i<2; i++) {
+            u8g2.drawStr(12, 10*(i+1), displayItems[indexes[i]].getName());
+            u8g2.drawStr(72, 10*(i+1), displayItems[indexes[i]].getCurrentLevel());
+          }
+          u8g2.setFont(u8g2_font_open_iconic_arrow_1x_t);
+          u8g2.drawUTF8(2,10*cursor,"\u0042");
+
+          digitalToggle(LED_BUILTIN);
         }
-        // u8g2.drawUTF8(111,20,"\u25E0");
-        // u8g2.drawUTF8(119,20,"\u25E1");
 
-        u8g2.setFont(u8g2_font_6x10_tf);
-
-        // MENU
-        int indexes[2];
-        int cursor;
-        int menuIndex = knobs[0].getRotation();
-        int incIndex = knobs[1].getRotation();
-
-        if (currentMenuRotation != incIndex) {
-          int newLevel = displayItems[menuIndex].changeLevel(incIndex - currentMenuRotation);
-          changingLevel(newLevel,menuIndex);
-          currentMenuRotation = incIndex;
-        }
-
-        if (menuIndex == 0) {
-          indexes[0] = 0;
-          indexes[1] = 1;
-          // indexes[2] = 2;
-          cursor = 1;
-        } else if (menuIndex == displayLength-1) {
-          indexes[0] = displayLength-2;
-          indexes[1] = displayLength-1;
-          // indexes[2] = displayLength-1;
-          cursor = 2;
-        } else {
-          // indexes[0] = menuIndex-1;
-          indexes[0] = menuIndex;
-          indexes[1] = menuIndex+1;
-          cursor = 1;
-        }
-
-        for (int i=0; i<2; i++) {
-          u8g2.drawStr(12, 10*(i+1), displayItems[indexes[i]].getName());
-          u8g2.drawStr(72, 10*(i+1), displayItems[indexes[i]].getCurrentLevel());
-        }
-        u8g2.setFont(u8g2_font_open_iconic_arrow_1x_t);
-        u8g2.drawUTF8(2,10*cursor,"\u0042");
-        
-        
         u8g2.setFont(u8g2_font_6x10_tf);
 
         int count = 0;
@@ -479,21 +699,27 @@ void displayUpdateTask(void *pvParameters)
         xSemaphoreGive(keyArrayMutex);
 
         u8g2.sendBuffer();
-        digitalToggle(LED_BUILTIN);
       }
 }
-
 void setup() {
-  // put your setup code here, to run once:
+  // CAN
+  msgInQ = xQueueCreate(36,8);
+  msgOutQ = xQueueCreate(36,8);
+
+  CAN_Init(false);
+  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  CAN_RegisterTX_ISR(CAN_TX_ISR);
+  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
+  setCANFilter(0x123,0x7ff);
+  CAN_Start();
 
   // fill_sintable();
-  for (int index = 0; index < 501; index++) {
-    sine_table[index] = b*(sin(2*PI * index / 500.0)+1);
+  for (int index = 0; index < 5001; index++) {
+    sine_table[index] = b*(sin(2*PI * (index / 5000.0) * 100)+1); // freq = 100
   }
 
   // Init display items
   for (int i=0; i<displayLength; i++){
-    Serial.println(i);
     changingLevel(displayItems[i].getCurrentLevelInt(), i);
   }
 
@@ -542,8 +768,26 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    4,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
+
+  TaskHandle_t decodeTaskHandle  = NULL;
+  xTaskCreate(
+    decodeTask ,		/* Function that implements the task */
+    "decodeTask ",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */
+    &decodeTaskHandle);  /* Pointer to store the task handle */    
+
+    TaskHandle_t CAN_TX_TaskHandle = NULL;
+  xTaskCreate(
+    CAN_TX_Task,		/* Function that implements the task */
+    "CAN_TX_queue",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    3,			/* Task priority */
+    &CAN_TX_TaskHandle );  /* Pointer to store the task handle */
 
   TaskHandle_t displayUpdateHandle = NULL;
   xTaskCreate(
