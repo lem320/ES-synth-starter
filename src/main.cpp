@@ -10,7 +10,7 @@
 #define displayLength 5
 
 const uint32_t interval = 100; //Display update interval
-const float interuptFreq = 1000;
+const float interuptFreq = 22000;
 const double hz = 440;
 const double freq_diff = pow(2, (1.0 / 12.0));
 const double a = pow(2.0, 32) / interuptFreq;
@@ -371,7 +371,7 @@ void setRow(uint8_t rowIdx){
 void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
   Vout = Vout >> (8 - knobs[3].getRotation());
-   Serial.println(Vout+128);
+   //Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
