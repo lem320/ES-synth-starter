@@ -70,6 +70,28 @@ SemaphoreHandle_t CAN_TX_Semaphore;
 
 uint32_t sine_table[5001];
 
+class Filter {
+  public:
+    Filter() {
+      b[0] = 0.12495599;
+      b[1] = 0.12495599;
+      a = 0.75008802;
+    };
+
+    uint32_t filt(uint32_t xNew) {
+      uint32_t yNew = b[0]*xNew + b[1]*xOld + a*yOld;
+      xOld = xNew;
+      yOld = yNew;
+      return yNew;
+    }
+
+  private:
+    uint32_t xOld;
+    uint32_t yOld;
+    float b[2];
+    float a;
+};
+
 class Note {
   public:
     Note() {};
@@ -95,11 +117,15 @@ class Note {
         phaseAcc = 0;
         time = 0;
       }
-      if (envelopeActive) {
-        setEnvelope();
-        return phaseAcc*envelope;
-      }
-      else return phaseAcc;
+      // Serial.println(sine_table[(int)(fmodf(300*time,1.0)*5000)]);
+      // Serial.println(fmodf(300*time,1.0)*5000);
+
+      // Serial.println(sine_table[(int)(fmodf(frequency*time,1.0)*5000)]);
+      if (envelopeActive) setEnvelope();
+      if (envelopeActive && lfoOn) return phaseAcc*0*envelope + 1.0*sine_table[(int)(fmodf(3*time,1.0)*5000)];
+      else if (envelopeActive && !lfoOn) return phaseAcc*envelope;
+      else if (lfoOn) return phaseAcc*0.5 + 1*sine_table[(int)(5*time*5000)];
+      return phaseAcc;
     }
 
     bool getIsPressed() { return isPressed || (envelope > 0 && envelopeActive); }
@@ -108,17 +134,18 @@ class Note {
     void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
     void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
 
-    void envelopeActiveNotes(bool v) {
-      envelopeActive = v;
-    }
-    void changeWave(int pWave) {
-      wave = pWave;
-    } 
+    void envelopeActiveNotes(bool v) { envelopeActive = v; }
+    void changeWave(int pWave) { wave = pWave; } 
 
     void setTone(int octave) {
       stepSize = stepSizes[octave+1];
       frequency = frequencies[octave+1];
       period = periods[octave+1];
+    }
+
+    void changeLFO(int pLFO) {
+      if (pLFO == 0) lfoOn = false;
+      else if (pLFO == 1) lfoOn = true;
     }
 
   private:
@@ -138,13 +165,16 @@ class Note {
     int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
     bool envelopeActive;
 
+    bool lfoOn;
+
     void nextPhaseAcc() {
       if (wave == 0) phaseAcc += stepSize;
       else if (wave == 2) {
-        phaseAcc = sine_table[(int)(frequency*time*50)];
-        time += envelopeGradient;
-        if (time >= period) time = 0;
+        phaseAcc = sine_table[(int)(fmodf(frequency*time,1.0)*5000)];
       }
+
+      time += envelopeGradient;
+      if (time >= period) time = time - period;
     }
 
     void changeEnvelope(float incr) {
@@ -181,6 +211,7 @@ class Octave {
       octave = pOctave;
       for (int i=0; i<12; i++) 
         notes[i] = new Note (i-9);
+      filterOn = false;
     }
 
     uint32_t getNextTotalPhaseAcc() {
@@ -193,7 +224,9 @@ class Octave {
         if (notes[i]->getIsPressed()) 
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc() / totalPressed;
 
-      return (uint32_t)(totalPhaseAcc);
+
+      if (filterOn) totalPhaseAcc = filter.filt(totalPhaseAcc);
+      return totalPhaseAcc;
     }
 
     void envelopeActiveOctave(bool v) {
@@ -215,10 +248,20 @@ class Octave {
       for (int i=0; i<12; i++) 
         notes[i]->setTone(octave); // +octave*12
     }
+    void changeFilter(int pFilter) {
+      if (pFilter == 0) filterOn = false;
+      else if (pFilter == 1) filterOn = true;
+    }
+    void changeLFO(int pLFO) {
+      for (int i=0; i<12; i++) 
+        notes[i]->changeLFO(pLFO);
+    }
 
   private:
     Note* notes[12];
     int octave;
+    Filter filter;
+    bool filterOn;
 };
 
 Octave octave (-1);
@@ -306,7 +349,7 @@ Knob knobs[4] = {
   {0,0,displayLength-1},
   {0,0,10},
   {0,0,2},
-  {3,0,8}
+  {5,0,8}
 };
 
 bool keyboardIsMaster = false;
@@ -317,6 +360,12 @@ void changingLevel(int currentLevel, int type) {
     case 0:
       octave.envelopeActiveOctave(currentLevel == 1);
       break;
+    case 1:
+      octave.changeFilter(currentLevel);
+      break;
+    case 2:
+      octave.changeLFO(currentLevel);
+      break;
     default:
       break;
   } //getCurrentLevel()
@@ -326,9 +375,9 @@ char* boolLevels[2] = {(char*)"Off",(char*)"On"};
 DisplayItem displayItems[displayLength] = {
   {(char*)"Envelope",boolLevels,1},
   {(char*)"Filtering",boolLevels,0},
-  {(char*)"Item 1",boolLevels,0},
-  {(char*)"Item 2",boolLevels,0},
-  {(char*)"Item 3",boolLevels,0}
+  {(char*)"LFO",boolLevels,0},
+  {(char*)"PH 2",boolLevels,0},
+  {(char*)"PH 3",boolLevels,0}
 };
 
 
@@ -394,7 +443,7 @@ void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
   int volume = (keyboardIsMaster) ? knobs[3].getRotation() : volumeSent;
   Vout = Vout >> (8 - volume);
-  // Serial.println(Vout+128);
+  Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -464,13 +513,15 @@ void scanKeysTask(void * pvParameters) {
     if (!leftKeyboard && !rightKeyboard) {
       TX_Message[0] = 1;
       txmessage_nonvolatile[0] = TX_Message[0];
-      
+
       TX_Message[1] = RX_Message[1];
       txmessage_nonvolatile[1] = TX_Message[1];
       TX_Message[2] = RX_Message[2];
       txmessage_nonvolatile[2] = TX_Message[2];
       TX_Message[3] = RX_Message[3];
       txmessage_nonvolatile[3] = TX_Message[3];
+      TX_Message[4] = RX_Message[4];
+      txmessage_nonvolatile[4] = TX_Message[4];
       changed = true;
     }
 
@@ -487,100 +538,22 @@ void scanKeysTask(void * pvParameters) {
       TX_Message[3] = displayItems[0].getCurrentLevelInt();
       txmessage_nonvolatile[3] = TX_Message[3];
 
+      TX_Message[4] = displayItems[1].getCurrentLevelInt();
+      txmessage_nonvolatile[4] = TX_Message[4];
+
       changed = true;
     } else if (!leftKeyboard) {
       volumeSent = RX_Message[1];
       octave.changeWaveOctave(RX_Message[2]);
       changingLevel(RX_Message[3],0);
+      changingLevel(RX_Message[4],1);
 
-      // Serial.print("rx ");
-      Serial.println(RX_Message[0]);
       int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
                          ( (RX_Message[0] == 0) ? 0 : 1 );
       if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
     }
-    Serial.println(octave.getOctave());
 
     if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
-
-
-
-    // if (keyboardIsMaster && RX_Message[0] == 2 && (leftKeyboard || rightKeyboard)) {
-    //   TX_Message[0] = 1;
-    //   txmessage_nonvolatile[0] = TX_Message[0];
-    // }
-
-    // if (keyboardIsMaster && RX_Message[1] == 1) __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);;
-
-    // // If MIDDLE keyboard or no other keyboards attached, go straight to MASTER
-    // if ( (!leftKeyboard && !rightKeyboard) || (leftKeyboard && rightKeyboard) ) {
-    //   __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
-    //   newMaster = 1;
-    // }
-    // else {
-    //   int threeKeyboardCheck = RX_Message[0];
-
-    //   // If threeKeyboardCheck uninitialised, wait and see if a MIDDLE keyboard sets it
-    //   if (threeKeyboardCheck == 0) {
-    //     delayMicroseconds(100000);
-    //     threeKeyboardCheck = RX_Message[0];
-    //   }
-    //   // If threeKeyboardCheck still uninitialised or if there are not three keyboards and we are the left-most keyboard, we are MASTER
-    //   if (threeKeyboardCheck != 2 && leftKeyboard) {
-        
-    //     if (!keyboardIsMaster) newMaster = 1;
-    //     __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
-    //   }
-
-    // }
-
-    // // Serial.print(" ");
-    // // Serial.print(keyboardIsMaster);
-    // // Serial.print(" ");
-    // // Serial.print(leftKeyboard);
-    // // Serial.print(" ");
-    // // Serial.print(rightKeyboard);
-    // // Serial.print(" ");
-    // // Serial.print(RX_Message[0]);
-    // // Serial.print(" ");
-    // // Serial.println(RX_Message[1]);
-
-
-    // // if (!keyboardIsMaster) {
-    // //   if (threeKeyboardCheck == 0) delayMicroseconds(1000);
-    // //   if (RX_Message[0] == 0 && !rightKeyboard) keyboardIsMaster = true;
-    // // }
-
-
-    // if (RX_Message[1] == 1 && keyboardIsMaster) __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
-
-    // if (leftKeyboard && rightKeyboard) {
-    //   // CAN_Init(false);
-    //   if (keyboardIsMaster) {
-    //     if (!leftKeyboard && !rightKeyboard) {
-    //       TX_Message[0] = 2;
-    //       txmessage_nonvolatile[0] = TX_Message[0];
-    //     } else {
-    //       TX_Message[0] = 1;
-    //       txmessage_nonvolatile[0] = TX_Message[0];
-    //     }
-    //     TX_Message[1] = newMaster;
-    //     txmessage_nonvolatile[1] = TX_Message[1];
-    //     TX_Message[2] = knobs[3].getRotation();
-    //     txmessage_nonvolatile[2] = TX_Message[2];
-
-    //     xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
-    //   } else {
-    //     volumeSent = RX_Message[2];
-
-    //     int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0
-    //                         : ( (!leftKeyboard) ? 1 : -1 );
-    //     if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
-    //   }
-    // } else {
-    //   // CAN_Init(true);
-    // }
-
   }
 }
 int currentWave = 0;
@@ -715,7 +688,7 @@ void setup() {
 
   // fill_sintable();
   for (int index = 0; index < 5001; index++) {
-    sine_table[index] = b*(sin(2*PI * (index / 5000.0) * 100)+1); // freq = 100
+    sine_table[index] = b*(sin(2*PI * (index / 5000.0))+1); // freq = 1
   }
 
   // Init display items
