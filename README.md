@@ -25,13 +25,32 @@
 - [Synchronisation](#synchronisation)
 - [Dependencies](#dependencies)
 
+# Tasks
+## Scanning Keys
+ ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
+  
+## Display
+ ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
+  
+## Decoding
+ ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
+  
+## ISR
+ ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
+
 # Features
 ## Polyphony
   ### Implementation  
   To implement this, the code had to be vastly changed into an OOP style, having the keyboard as a class named Octave, and each key being a class named Notes. The Octave class stored a Note class for each key on the keyboard. Inside the Note class, each key has its own phaseAcc variable, which is changed upon a press of the key the Note class refers to. The octave class then takes the average of all of the phaseAccs from the Note classes to output a superimposed wave of all the keys being played.
-  ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+ 
 
 ## Envelope
   ### Implementation
@@ -46,9 +65,7 @@
   * Final fall (3): This slowly decreases the envelope amplitde to 0. Once it reaches 0, the envelope moves back into state 0, completeing the cycle. <br />
 
   The enevelope was implemented in the Note class so that each key has it's own envelope. <br />
-  ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+  
 
 ## Waveform Selection
   ### Implementation
@@ -58,27 +75,21 @@
   * Square wave: The output is changed to make it the most significant bit of the saw-tooth wave.<br />
   * Sine wave: A look up table is made in the setup function of the code. It stores a sine wave of frequency 1Hz, with 5000 samples. A time variable is then stores in the Note class. This variable is the time since the key was first pressed modulo the period of the wave the note is outputting. This is to prevent the time variable increasing to a large number and overflowing. The time it then used to index the LUT and this value is stored in the phase accumulator.
   * Triangle wave: The phase accumulator is increased until one more step would cause it to overflow, then it switches states to decrease. It repeats this action until the value would overflow the other way, and continues to repeat. <br />
-  ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+
 
 ## Filtering
   ### Implementation
   This keyboard has an option to apply a Low Pass Filter onto the output. This is set in the menu on the Master Keyboard's dislpay. The filter has a cut off frequency of 1kHz to not attenuate the desired frequencies being played from the keyboard.
   
   The LPF was implemented using the Filter class that stores the coefficients for each term as well as previous values for the inputted and outputted values.
-  ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+
 
 ## Low Frequency Oscillator
   ### Implementation
   This keyboard has an option to add a Low Frequency Oscillator onto the output. This is set in the menu on the Master Keyboard's dislpay.
   
   The LFO was implemented by superimposing a low frequency and small amplitude sine wave onto the output of each key in the Note class.
-  ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+
   
   
  ## Advanced Display
@@ -90,9 +101,7 @@
   * Knob 2: Changed the status of the feature selected by Knob 1
   * Knob 3: Change the waveform
   * Knob 4: Change the volume
-  ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+ 
 
 
 
