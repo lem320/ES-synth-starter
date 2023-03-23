@@ -85,8 +85,7 @@
 
 
 # Rate Monotonic Scheduler
-A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met
-under worst-case conditions
+Using initiation interval times and the execution times, we consider the latency of the lowest-priority task. This task is the displayUpdateTask that has an initiation interval of 100ms. Using the latency equation, the latency is 73.65.
 
 # CPU Utilisation
 A quantification of total CPU utilisation
