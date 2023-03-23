@@ -32,7 +32,7 @@
 | scanKeysTask      | Thread     | 20                                 | 83.72                         |  
 | displayUpdateTask | Thread     | 100                                | 15180.25                      |  
 | decodeTask        | Thread     |                                    | 501.50                        | 
-| CAN               | Thread     |                                    | 23.00                         |  
+| CAN_TX_Task       | Thread     |                                    | 23.00                         |  
 | sampleISR         | Interrupt  |                                    | 430.44                        |
 | CAN_RX_ISR        | Interrupt  | 0.7                                |                               | 
 | CAN_TX_ISR        | Interrupt  | 0.7                                |                               | 
