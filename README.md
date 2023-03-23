@@ -21,15 +21,15 @@
 - [Dependencies](#dependencies)
 
 # Tasks
-| Task              | Type       | Initiation Interval | Execution Time  | 
-|-------------------|------------|---------------------|-----------------|
-| scanKeysTask      | Thread     | 20 ms               | 83.7 µs         |  
-| displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |  
-| decodeTask        | Thread     | 25.5 ms             | 501.5 µs        | 
-| CAN_TX_Task       | Thread     | 60 ms               | 23 µs           |  
-| sampleISR         | Interrupt  | 45.5 µs             | 430.4 µs        |
-| CAN_RX_ISR        | Interrupt  | 700 µs              |                 | 
-| CAN_TX_ISR        | Interrupt  | 700 µs              |                 | 
+| Task              | Type       | Initiation Interval | Execution Time  | Characterisation |
+|-------------------|------------|---------------------|-----------------|------------------|
+| scanKeysTask      | Thread     | 20 ms               | 83.7 µs         |                  |  
+| displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |                  |  
+| decodeTask        | Thread     | 25.5 ms             | 501.5 µs        |                  | 
+| CAN_TX_Task       | Thread     | 60 ms               | 23 µs           |                  |  
+| sampleISR         | Interrupt  | 45.5 µs             | 430.4 µs        |                  |
+| CAN_RX_ISR        | Interrupt  | 700 µs              |                 |                  | 
+| CAN_TX_ISR        | Interrupt  | 700 µs              |                 |                  | 
 
 
 # Features
