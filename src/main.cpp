@@ -90,6 +90,28 @@ SemaphoreHandle_t CAN_TX_Semaphore;
 
 uint32_t sine_table[5001];
 
+class Filter {
+  public:
+    Filter() {
+      b[0] = 0.12495599;
+      b[1] = 0.12495599;
+      a = 0.75008802;
+    };
+
+    uint32_t filt(uint32_t xNew) {
+      uint32_t yNew = b[0]*xNew + b[1]*xOld + a*yOld;
+      xOld = xNew;
+      yOld = yNew;
+      return yNew;
+    }
+
+  private:
+    uint32_t xOld;
+    uint32_t yOld;
+    float b[2];
+    float a;
+};
+
 class Note {
   public:
     Note() {};
@@ -115,11 +137,15 @@ class Note {
         phaseAcc = 0;
         time = 0;
       }
-      if (envelopeActive) {
-        setEnvelope();
-        return phaseAcc*envelope;
-      }
-      else return phaseAcc;
+      // Serial.println(sine_table[(int)(fmodf(300*time,1.0)*5000)]);
+      // Serial.println(fmodf(300*time,1.0)*5000);
+
+      // Serial.println(sine_table[(int)(fmodf(frequency*time,1.0)*5000)]);
+      if (envelopeActive) setEnvelope();
+      if (envelopeActive && lfoOn) return phaseAcc*0*envelope + 1.0*sine_table[(int)(fmodf(3*time,1.0)*5000)];
+      else if (envelopeActive && !lfoOn) return phaseAcc*envelope;
+      else if (lfoOn) return phaseAcc*0.5 + 1*sine_table[(int)(5*time*5000)];
+      return phaseAcc;
     }
 
     bool getIsPressed() { return isPressed || (envelope > 0 && envelopeActive); }
@@ -128,17 +154,18 @@ class Note {
     void pressed() { __atomic_store_n(&isPressed, true, __ATOMIC_RELAXED); }
     void released() { __atomic_store_n(&isPressed, false, __ATOMIC_RELAXED); }
 
-    void envelopeActiveNotes(bool v) {
-      envelopeActive = v;
-    }
-    void changeWave(int pWave) {
-      wave = pWave;
-    } 
+    void envelopeActiveNotes(bool v) { envelopeActive = v; }
+    void changeWave(int pWave) { wave = pWave; } 
 
     void setTone(int octave) {
       stepSize = stepSizes[octave+1];
       frequency = frequencies[octave+1];
       period = periods[octave+1];
+    }
+
+    void changeLFO(int pLFO) {
+      if (pLFO == 0) lfoOn = false;
+      else if (pLFO == 1) lfoOn = true;
     }
 
   private:
@@ -157,6 +184,8 @@ class Note {
     float envelope;
     int envelopeState; // 0 is initial increasing phase, 1 is first decreasing phase, 2 is constant phase and 3 is the final decreasing phase
     bool envelopeActive;
+
+    bool lfoOn;
 
     void nextPhaseAcc() {
       uint32_t oldphaseAcc;
@@ -180,14 +209,15 @@ class Note {
         }
       }
       else if (wave == 2) {
-        phaseAcc = sine_table[(int)(frequency*time*50)];
-        time += envelopeGradient;
-        if (time >= period) time = 0;
+        phaseAcc = sine_table[(int)(fmodf(frequency*time,1.0)*5000)];
       }
       else if (wave == 3){
             tempphaseAcc += stepSize; 
             phaseAcc  = (tempphaseAcc & (1 << 31));
       }      
+
+      time += envelopeGradient;
+      if (time >= period) time = time - period;
     }
 
     void changeEnvelope(float incr) {
@@ -224,6 +254,8 @@ class Octave {
       octave = pOctave;
       for (int i=0; i<12; i++) 
         notes[i] = new Note (i-9);
+
+      filterOn = false;
     }
 
     uint32_t getNextTotalPhaseAcc() {
@@ -236,7 +268,9 @@ class Octave {
         if (notes[i]->getIsPressed()) 
           totalPhaseAcc += notes[i]->incrementAndGetPhaseAcc() / totalPressed;
 
-      return (uint32_t)(totalPhaseAcc);
+
+      if (filterOn) totalPhaseAcc = filter.filt(totalPhaseAcc);
+      return totalPhaseAcc;
     }
 
     void envelopeActiveOctave(bool v) {
@@ -259,9 +293,23 @@ class Octave {
         notes[i]->setTone(octave); // +octave*12
     }
 
+    void changeFilter(int pFilter) {
+      if (pFilter == 0) filterOn = false;
+      else if (pFilter == 1) filterOn = true;
+    }
+    void changeLFO(int pLFO) {
+      for (int i=0; i<12; i++) 
+        notes[i]->changeLFO(pLFO);
+    }
+
+
   private:
     Note* notes[12];
     int octave;
+
+    Filter filter;
+    bool filterOn;
+
 };
 
 class DisplayItem {
@@ -349,7 +397,8 @@ Knob knobs[4] = {
   {0,0,displayLength-1},
   {0,0,10},
   {0,0,3},
-  {3,0,8}
+  {5,0,8}
+
 };
 
 bool keyboardIsMaster = false, leftKeyboard = false, rightKeyboard = false;
@@ -360,6 +409,13 @@ void changingLevel(int currentLevel, int type) {
     case 0:
       octave.envelopeActiveOctave(currentLevel == 1);
       break;
+
+    case 1:
+      octave.changeFilter(currentLevel);
+      break;
+    case 2:
+      octave.changeLFO(currentLevel);
+      break;
     default:
       break;
   } //getCurrentLevel()
@@ -369,9 +425,11 @@ char* boolLevels[2] = {(char*)"Off",(char*)"On"};
 DisplayItem displayItems[displayLength] = {
   {(char*)"Envelope",boolLevels,1},
   {(char*)"Filtering",boolLevels,0},
-  {(char*)"Item 1",boolLevels,0},
-  {(char*)"Item 2",boolLevels,0},
-  {(char*)"Item 3",boolLevels,0}
+
+  {(char*)"LFO",boolLevels,0},
+  {(char*)"PH 2",boolLevels,0},
+  {(char*)"PH 3",boolLevels,0}
+
 };
 
 
@@ -438,6 +496,7 @@ void CAN_TX_Task (void * pvParameters) {
 }
 
 void decodeTask(void * pvParameters){
+
   #ifndef TEST_DECODE
     while(1) 
   #endif
@@ -508,6 +567,7 @@ void scanKeysTask(void * pvParameters) {
   bool leftKeyboard, rightKeyboard;
   // int threeKeyboardCheck = 0; // 0 means unknown, 1 means false and 2 means true
 
+
   #ifndef TEST_SCANKEYS
   while (1) 
   #endif
@@ -516,6 +576,7 @@ void scanKeysTask(void * pvParameters) {
     #ifndef TEST_SCANKEYS
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     #endif
+    
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     for (uint8_t i=0; i<7; i++) {
       setRow(i);
@@ -529,7 +590,9 @@ void scanKeysTask(void * pvParameters) {
       switch (i) {
         case 0: case 1: case 2:
           for (int j=0; j<4; j++)
-            if (!(keyArray[i] & (1 << j)))octave.pressNote(i*4+j);
+
+            if (!(keyArray[i] & (1 << j))) octave.pressNote(i*4+j);
+
             else octave.releaseNote(i*4+j);
           break;
         case 3: case 4:
@@ -575,6 +638,7 @@ void displayUpdateTask(void *pvParameters)
         #ifndef TEST_DISPLAY
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
         #endif
+
         u8g2.clearBuffer();
         if (keyboardIsMaster) {
           
@@ -706,7 +770,7 @@ void setup() {
 
   // fill_sintable();
   for (int index = 0; index < 5001; index++) {
-    sine_table[index] = b*(sin(2*PI * (index / 5000.0) * 100)+1); // freq = 100
+    sine_table[index] = b*(sin(2*PI * (index / 5000.0))+1); // freq = 1
   }
 
   // Init display items
@@ -741,11 +805,13 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
+
   #ifndef DISABLE_ATTACH_ISR
     sampleTimer->setOverflow(interuptFreq, HERTZ_FORMAT);
     sampleTimer->attachInterrupt(sampleISR);
     sampleTimer->resume();
   #endif
+
 
   //Initialise UART
   Serial.begin(115200);
@@ -871,3 +937,4 @@ void setup() {
 
 void loop() {
 }
+
