@@ -85,7 +85,7 @@
 
 
 # Rate Monotonic Scheduler
-![alt text](https://github.com/lem320/ES-synth-starter/master/Critical%20Instance%20Analysis.png?raw=true)
+![alt text](https://github.com/lem320/ES-synth-starter/master/blob/Critical%20Instance%20Analysis.png?raw=true)
 
 Using initiation interval times and the execution times, we consider the largest possible latency of the lowest-priority task. This task is the displayUpdateTask that has an initiation interval of 100ms. Using the above latency equation, the latency is found to be 73.65ms. As this is less than the initialtion interval of 100ms, it does not breach timing constraints so all deadlines are met under the worst-case conditions.
 
