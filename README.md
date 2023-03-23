@@ -20,18 +20,6 @@
 - [Synchronisation](#synchronisation)
 - [Dependencies](#dependencies)
 
-# Tasks
-| Task              | Type       | Initiation Interval | Execution Time  | Characterisation |
-|-------------------|------------|---------------------|-----------------|------------------|
-| scanKeysTask      | Thread     | 20 ms               | 84 µs           |                  |
-| displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |                  |  
-| decodeTask        | Thread     | 25.2 ms             | 0.03 µs         |                  | 
-| CAN_TX_Task       | Thread     | 60 ms               | 12 µs           |                  |  
-| sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
-| CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
-| CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
-
-
 # Features
 ## Polyphony
   To implement this, the code had to be vastly changed into an OOP style, having the keyboard as a class named Octave, and each key being a class named Notes. The Octave class stored a Note class for each key on the keyboard. Inside the Note class, each key has its own phaseAcc variable, which is changed upon a press of the key the Note class refers to. The octave class then takes the average of all of the phaseAccs from the Note classes to output a superimposed wave of all the keys being played.
@@ -82,6 +70,17 @@
   * Knob 3: Change the waveform
   * Knob 4: Change the volume
  
+
+# Tasks
+| Task              | Type       | Initiation Interval | Execution Time  | Characterisation |
+|-------------------|------------|---------------------|-----------------|------------------|
+| scanKeysTask      | Thread     | 20 ms               | 84 µs           |                  |
+| displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |                  |  
+| decodeTask        | Thread     | 25.2 ms             | 0.03 µs         |                  | 
+| CAN_TX_Task       | Thread     | 60 ms               | 12 µs           |                  |  
+| sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
+| CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
+| CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
 
 
 
