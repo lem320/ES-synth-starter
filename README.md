@@ -89,6 +89,8 @@
 A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met
 under worst-case conditions
 
+The critical instant is the time instant at which the system is most loaded and therefore has the worst response time.
+
 # CPU Utilisation
 A quantification of total CPU utilisation
 
