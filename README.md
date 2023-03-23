@@ -7,6 +7,19 @@
   [Lab Part 2](doc/LabPart2.md)
 
 # Contents
+- [Tasks](#tasks)
+  * [Scanning Keys](#scanning keys)
+    + [Characterisation](#characterisation)
+    + [Timings](#timings)
+  * [Display](#display)
+    + [Characterisation](#characterisation)
+    + [Timings](#timings)
+  * [Decoding](#decoding)
+    + [Characterisation](#characterisation)
+    + [Timings](#timings)
+  * [ISR](#isr)
+    + [Characterisation](#characterisation)
+    + [Timings](#timings)
 - [Features](#features)
   * [Polyphony](#polyphony)
     + [Implementation](#implementation)
@@ -32,16 +45,19 @@
   Measured maximum execution time: <br />
   
 ## Display
+ ### Characterisation
  ### Timings
   Theoretical minimum initiation interval: <br />
   Measured maximum execution time: <br />
   
 ## Decoding
+ ### Characterisation
  ### Timings
   Theoretical minimum initiation interval: <br />
   Measured maximum execution time: <br />
   
 ## ISR
+ ### Characterisation
  ### Timings
   Theoretical minimum initiation interval: <br />
   Measured maximum execution time: <br />
