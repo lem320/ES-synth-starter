@@ -109,5 +109,4 @@ These cannot be stored atomically as they are vectors, so MUTEXs are used so tha
 
 # Dependencies
 An analysis of inter-task blocking dependencies that shows any possibility of deadlock
-    
- 
+
