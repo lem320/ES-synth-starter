@@ -74,13 +74,13 @@
 # Tasks
 |Priority     | Task              | Type       | Initiation Interval | Execution Time  | Characterisation |
 |-------------|-------------------|------------|---------------------|-----------------|------------------|
-|1            | scanKeysTask      | Thread     | 20 ms               | 84 µs           |                  |  
-|2            | decodeTask        | Thread     | 25.2 ms             | 0.03 µs         |                  | 
-|3            | CAN_TX_Task       | Thread     | 60 ms               | 12 µs           |                  |
-|4            | displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |                  |
-|      -      | sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
-|      -      | CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
-|      -      | CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
+|1            | scanKeysTask      | Thread     | 20 ms               | 84 µs           | Sets value of keyArray and sets the notes being played |  
+|2            | decodeTask        | Thread     | 25.2 ms             | 0.03 µs         | Stores CAN message received                            | 
+|3            | CAN_TX_Task       | Thread     | 60 ms               | 12 µs           | Sends CAN message                                      |
+|4            | displayUpdateTask | Thread     | 100 ms              | 15.2 ms         | Creates and sends data buffer to display               |
+|      -      | sampleISR         | Interrupt  | 45.5 µs             | 26 µs           | Sets the analogue voltage to the speaker               |
+|      -      | CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            | Receives CAN message                                   | 
+|      -      | CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            | Gives MUTEX to CAN_TX_Task                             | 
 
 
 
@@ -110,3 +110,8 @@ These cannot be stored atomically as they are vectors, so MUTEXs are used so tha
 # Dependencies
 An analysis of inter-task blocking dependencies that shows any possibility of deadlock
 
+## Blocking functions used include:
+* vTaskDelayUntil: This function blocks a task from running until a set time has elapsed. This function cannot cause a deadlock though as it can only block for a finite amount of time.
+* xSemaphoreTake: This function blocks a task as it waits to be able to take a MUTEX once the task that has the MUTEX has completed its goal, it will call xSemaphoreGive so that another task can take the MUTEX if it takes it in time. This function can cause a deadlock if a task holds the MUTEX indefinitely as it will cause all other functions waiting for the MUTEX to wait indefinitely.
+
+Only the above blocking functions are used and the xSemaphoreTake function is used carefully to prevent a deadlock from happening. This is done by having each task always release the MUTEX, meaning the MUTEX is never infinitely held.
