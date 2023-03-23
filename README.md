@@ -93,8 +93,20 @@ under worst-case conditions
 A quantification of total CPU utilisation
 
 # Synchronisation
-An identification of all the shared data structures and the methods used to guarantee safe access
-and synchronisation
+
+## Shared data structures
+* Octave: This is shared between scanKeys (to set the key being pressed), displayUpdateTask (to display the keys being pressed) and sampleISR (to retrieve the sound for the speaker to make).
+* Note: This is shared between scanKeys (called from Octave to set if the key it corresponds to is being pressed) and sampleISR (to retrieve the sound from each note to be summed by an Octave class function).
+* DisplayItem: This is shared between scanKeys (to get the level to send over CAN) and displayUpdateTask (to set the level).
+* Knob: This is shared between scanKeys (to get the level to send over CAN), displayUpdateTask (to display the level) and sampleISR (to set the volume using the forth knob).
+
+Safe access in these classes is guaranteed by using atomic stores to store variables within the class that are shared between the tasks.
+
+## Shared vectors
+* keyArray: This is shared between scanKeys and displayUpdateTask. 
+* CAN_TX_Semaphore: This is shared between CAN_TX_ISR and CAN_TX_Task
+
+These cannot be stored atomically as it is a vector, so MUTEXs are used so that only one task can read/write to the variables at any time.
 
 # Dependencies
 An analysis of inter-task blocking dependencies that shows any possibility of deadlock
