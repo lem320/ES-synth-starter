@@ -121,3 +121,4 @@ An analysis of inter-task blocking dependencies that shows any possibility of de
 * xSemaphoreTake: This function blocks a task as it waits to be able to take a MUTEX once the task that has the MUTEX has completed its goal, it will call xSemaphoreGive so that another task can take the MUTEX if it takes it in time. This function can cause a deadlock if a task holds the MUTEX indefinitely as it will cause all other functions waiting for the MUTEX to wait indefinitely.
 
 Only the above blocking functions are used and the xSemaphoreTake function is used carefully to prevent a deadlock from happening. This is done by having each task always release the MUTEX, meaning the MUTEX is never infinitely held.
+
