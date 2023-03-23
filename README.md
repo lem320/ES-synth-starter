@@ -8,9 +8,6 @@
 
 # Contents
 - [Tasks](#tasks)
-  * [Scanning Keys](#scanning keys)
-    + [Characterisation](#characterisation)
-    + [Timings](#timings)
   * [Display](#display)
     + [Characterisation](#characterisation)
     + [Timings](#timings)
