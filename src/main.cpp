@@ -3,6 +3,23 @@
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
 
+// ------------ EXECUTION TIME ---------------
+// Uncomment the test/disable you want to find the execution time for
+
+//#define DISABLE_THREADS
+//#define DISABLE_ATTACH_ISR
+//#define DISABLE_CAN_TX_ISR
+//#define DISABLE_CAN_RX_ISR
+
+//#define TEST_SCANKEYS
+//#define TEST_DISPLAY
+//#define TEST_DECODE
+//#define TEST_CAN
+//#define TEST_ATTACH_ISR
+//#define TEST_CAN_TX_ISR
+//#define TEST_CAN_RX_ISR
+
+//May need to add ones for can isr
 
 // ------------ CONSTANTS ---------------
 
@@ -175,6 +192,9 @@ class Note {
 
       time += envelopeGradient;
       if (time >= period) time = time - period;
+
+
+
     }
 
     void changeEnvelope(float incr) {
@@ -211,6 +231,7 @@ class Octave {
       octave = pOctave;
       for (int i=0; i<12; i++) 
         notes[i] = new Note (i-9);
+
       filterOn = false;
     }
 
@@ -248,6 +269,7 @@ class Octave {
       for (int i=0; i<12; i++) 
         notes[i]->setTone(octave); // +octave*12
     }
+
     void changeFilter(int pFilter) {
       if (pFilter == 0) filterOn = false;
       else if (pFilter == 1) filterOn = true;
@@ -257,11 +279,14 @@ class Octave {
         notes[i]->changeLFO(pLFO);
     }
 
+
   private:
     Note* notes[12];
     int octave;
+
     Filter filter;
     bool filterOn;
+
 };
 
 Octave octave (-1);
@@ -349,6 +374,7 @@ Knob knobs[4] = {
   {0,0,displayLength-1},
   {0,0,10},
   {0,0,2},
+
   {5,0,8}
 };
 
@@ -360,6 +386,7 @@ void changingLevel(int currentLevel, int type) {
     case 0:
       octave.envelopeActiveOctave(currentLevel == 1);
       break;
+
     case 1:
       octave.changeFilter(currentLevel);
       break;
@@ -375,9 +402,11 @@ char* boolLevels[2] = {(char*)"Off",(char*)"On"};
 DisplayItem displayItems[displayLength] = {
   {(char*)"Envelope",boolLevels,1},
   {(char*)"Filtering",boolLevels,0},
+
   {(char*)"LFO",boolLevels,0},
   {(char*)"PH 2",boolLevels,0},
   {(char*)"PH 3",boolLevels,0}
+
 };
 
 
@@ -396,17 +425,27 @@ void CAN_TX_ISR (void) {
 void CAN_TX_Task (void * pvParameters) {
 
 	uint8_t msgOut[8];
-	while (1) {
+  #ifndef TEST_CAN
+	while (1) 
+  #endif
+  {
+    #ifndef TEST_CAN
 		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+    #endif
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
 		CAN_TX(0x123, msgOut);
 	}
 }
 
 void decodeTask(void * pvParameters){
-  while(1) {
-  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
 
+  #ifndef TEST_DECODE
+    while(1) 
+  #endif
+  {
+  #ifndef TEST_DECODE
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
+  #endif
   //need to recieve the command if there is a three board keyboard... need to be careful in the case that it isnt a three board keyboard, because there is a chance it will get stuck
   // threekeyboards_check = RX_Message[3];
 
@@ -443,7 +482,7 @@ void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
   int volume = (keyboardIsMaster) ? knobs[3].getRotation() : volumeSent;
   Vout = Vout >> (8 - volume);
-  Serial.println(Vout+128);
+  // Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -459,9 +498,15 @@ void scanKeysTask(void * pvParameters) {
   // int threeKeyboardCheck = 0; // 0 means unknown, 1 means false and 2 means true
 
 
-  while (1) {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+  #ifndef TEST_SCANKEYS
+  while (1) 
+  #endif
+  {
 
+    #ifndef TEST_SCANKEYS
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    #endif
+    
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     for (uint8_t i=0; i<7; i++) {
       setRow(i);
@@ -475,7 +520,9 @@ void scanKeysTask(void * pvParameters) {
       switch (i) {
         case 0: case 1: case 2:
           for (int j=0; j<4; j++)
+
             if (!(keyArray[i] & (1 << j))) octave.pressNote(i*4+j);
+
             else octave.releaseNote(i*4+j);
           break;
         case 3: case 4:
@@ -522,6 +569,7 @@ void scanKeysTask(void * pvParameters) {
       txmessage_nonvolatile[3] = TX_Message[3];
       TX_Message[4] = RX_Message[4];
       txmessage_nonvolatile[4] = TX_Message[4];
+
       changed = true;
     }
 
@@ -540,20 +588,20 @@ void scanKeysTask(void * pvParameters) {
 
       TX_Message[4] = displayItems[1].getCurrentLevelInt();
       txmessage_nonvolatile[4] = TX_Message[4];
-
       changed = true;
     } else if (!leftKeyboard) {
       volumeSent = RX_Message[1];
       octave.changeWaveOctave(RX_Message[2]);
       changingLevel(RX_Message[3],0);
+
       changingLevel(RX_Message[4],1);
 
       int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
                          ( (RX_Message[0] == 0) ? 0 : 1 );
       if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
     }
-
     if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+
   }
 }
 int currentWave = 0;
@@ -562,9 +610,14 @@ void displayUpdateTask(void *pvParameters)
       const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
       TickType_t xLastWakeTime = xTaskGetTickCount();
 
+      #ifndef TEST_DISPLAY
       while (1)
+      #endif
       {
+        #ifndef TEST_DISPLAY
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        #endif
+
         u8g2.clearBuffer();
         if (keyboardIsMaster) {
           
@@ -677,11 +730,16 @@ void displayUpdateTask(void *pvParameters)
 void setup() {
   // CAN
   msgInQ = xQueueCreate(36,8);
-  msgOutQ = xQueueCreate(36,8);
+  msgOutQ = xQueueCreate(384,8);
 
   CAN_Init(false);
-  CAN_RegisterRX_ISR(CAN_RX_ISR);
-  CAN_RegisterTX_ISR(CAN_TX_ISR);
+  #ifndef TEST_CAN_RX_ISR
+    CAN_RegisterRX_ISR(CAN_RX_ISR);
+  #endif
+
+  #ifndef TEST_CAN_TX_ISR
+    CAN_RegisterTX_ISR(CAN_TX_ISR);
+  #endif
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
   setCANFilter(0x123,0x7ff);
   CAN_Start();
@@ -723,9 +781,13 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  sampleTimer->setOverflow(interuptFreq, HERTZ_FORMAT);
-  sampleTimer->attachInterrupt(sampleISR);
-  sampleTimer->resume();
+
+  #ifndef DISABLE_ATTACH_ISR
+    sampleTimer->setOverflow(interuptFreq, HERTZ_FORMAT);
+    sampleTimer->attachInterrupt(sampleISR);
+    sampleTimer->resume();
+  #endif
+
 
   //Initialise UART
   Serial.begin(115200);
@@ -735,45 +797,120 @@ void setup() {
 
   keyArrayMutex = xSemaphoreCreateMutex();
 
-  TaskHandle_t scanKeysHandle = NULL;
-  xTaskCreate(
-    scanKeysTask,		/* Function that implements the task */
-    "scanKeys",		/* Text name for the task */
-    64,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    4,			/* Task priority */
-    &scanKeysHandle );  /* Pointer to store the task handle */
-
-  TaskHandle_t decodeTaskHandle  = NULL;
-  xTaskCreate(
-    decodeTask ,		/* Function that implements the task */
-    "decodeTask ",		/* Text name for the task */
-    64,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
-    &decodeTaskHandle);  /* Pointer to store the task handle */    
-
-    TaskHandle_t CAN_TX_TaskHandle = NULL;
-  xTaskCreate(
-    CAN_TX_Task,		/* Function that implements the task */
-    "CAN_TX_queue",		/* Text name for the task */
-    64,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
-    &CAN_TX_TaskHandle );  /* Pointer to store the task handle */
-
   TaskHandle_t displayUpdateHandle = NULL;
-  xTaskCreate(
-    displayUpdateTask,		/* Function that implements the task */
-    "displayUpdate",		/* Text name for the task */
-    64,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
-    &displayUpdateHandle );  /* Pointer to store the task handle */
+  TaskHandle_t CAN_TX_TaskHandle = NULL;
+  TaskHandle_t decodeTaskHandle  = NULL;
+  TaskHandle_t scanKeysHandle = NULL;
 
+  #ifndef DISABLE_THREADS
+    xTaskCreate(
+      scanKeysTask,		/* Function that implements the task */
+      "scanKeys",		/* Text name for the task */
+      64,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      4,			/* Task priority */
+      &scanKeysHandle );  /* Pointer to store the task handle */
+
+    xTaskCreate(
+      decodeTask ,		/* Function that implements the task */
+      "decodeTask ",		/* Text name for the task */
+      64,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      2,			/* Task priority */
+      &decodeTaskHandle);  /* Pointer to store the task handle */    
+
+    xTaskCreate(
+      CAN_TX_Task,		/* Function that implements the task */
+      "CAN_TX_queue",		/* Text name for the task */
+      64,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      3,			/* Task priority */
+      &CAN_TX_TaskHandle );  /* Pointer to store the task handle */
+
+    xTaskCreate(
+      displayUpdateTask,		/* Function that implements the task */
+      "displayUpdate",		/* Text name for the task */  
+      64,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      1,			/* Task priority */
+      &displayUpdateHandle );  /* Pointer to store the task handle */
+  #endif
+
+  #ifdef TEST_SCANKEYS
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      scanKeysTask(NULL);
+    }
+    Serial.println("Scanning Keys execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifdef TEST_DISPLAY
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      displayUpdateTask(NULL);
+    }
+    Serial.println("Display execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifdef TEST_CAN
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      CAN_TX_Task(NULL);
+    }
+    Serial.println("CAN execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifdef TEST_DECODE
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      decodeTask(NULL);
+    }
+    Serial.println("Decoding execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifdef TEST_ATTACH_ISR
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      sampleISR();
+    }
+    Serial.println("Attach ISR execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifdef TEST_CAN_TX_ISR
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      CAN_TX_ISR();
+    }
+    Serial.println("CAN TX ISR execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifdef TEST_CAN_RX_ISR
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++) {
+      CAN_RX_ISR();
+    }
+    Serial.println("CAN RX ISR execution time");
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  
   vTaskStartScheduler();
 
 }
 
 void loop() {
 }
+
