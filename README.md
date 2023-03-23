@@ -8,9 +8,6 @@
 
 # Contents
 - [Tasks](#tasks)
-  * [ISR](#isr)
-    + [Characterisation](#characterisation)
-    + [Timings](#timings)
 - [Features](#features)
   * [Polyphony](#polyphony)
     + [Implementation](#implementation)
