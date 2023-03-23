@@ -40,6 +40,7 @@
 
 # Tasks
 ## Scanning Keys
+ ### Characterisation
  ### Timings
   Theoretical minimum initiation interval: <br />
   Measured maximum execution time: <br />
