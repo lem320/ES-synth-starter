@@ -6,6 +6,7 @@
   
   [Lab Part 2](doc/LabPart2.md)
 
+# Contents
 - [Features](#features)
   * [Polyphony](#polyphony)
     + [Implementation](#implementation)
