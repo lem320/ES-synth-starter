@@ -4,7 +4,7 @@
 #include <ES_CAN.h>
 
 // ------------ EXECUTION TIME ---------------
-// Uncomment the test/disable you want to find the execution time for
+// Uncomment the thread/interupt you want to find the execution time for
 
 //#define DISABLE_THREADS
 //#define DISABLE_ATTACH_ISR
@@ -51,8 +51,11 @@ const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
+uint8_t modeDecrease;
+uint32_t tempphaseAcc;
 
-#define max_notes 1.0;
+
+#define max_notes 1.0
 #define displayLength 5
 
 const float interuptFreq = 22000;
@@ -69,14 +72,14 @@ const double b = pow(2.0, 31);
 volatile uint8_t TX_Message[8] = {0};
 uint8_t RX_Message[8]={0};
 uint8_t keypressrelease[4] = {0} ;
-uint32_t octaveindex;
-uint32_t octaveadd;
-uint8_t boardlocation;
-uint8_t firstkeyboard;
-uint8_t secondkeyboard;
+// uint32_t octaveindex;
+// uint32_t octaveadd;
+// uint8_t boardlocation;
+// uint8_t firstkeyboard;
+// uint8_t secondkeyboard;
 
 
-volatile uint8_t threekeyboards_check = 0;
+// volatile uint8_t threekeyboards_check = 0;
 
 QueueHandle_t msgInQ;
 QueueHandle_t msgOutQ;
@@ -156,12 +159,35 @@ class Note {
     bool envelopeActive;
 
     void nextPhaseAcc() {
+      uint32_t oldphaseAcc;
       if (wave == 0) phaseAcc += stepSize;
+      else if (wave == 1) { 
+        if ((phaseAcc + stepSize > oldphaseAcc) && !(modeDecrease)) {
+            oldphaseAcc = phaseAcc;
+            phaseAcc += stepSize; // increasing phaseAcc until before it overflows  by reaching its maximum value. From this point, decrease phaseAcc
+        }
+        else {          
+          //once it is about to overflow, set, modeDecrease to 1 to change the state to decrease the phaseAcc.
+          modeDecrease = 1;
+        }
+        if( (modeDecrease  == 1) && ((phaseAcc - stepSize) < (oldphaseAcc))) {    //if phaseAcc hasnt yet gone back down to zero, and modeDecrease is activated, decrease the phaseAcc.
+          oldphaseAcc = phaseAcc;
+          phaseAcc -= stepSize;
+        }
+        else{
+            modeDecrease =  0; 
+            //At this point the phaseAcc is set
+        }
+      }
       else if (wave == 2) {
         phaseAcc = sine_table[(int)(frequency*time*50)];
         time += envelopeGradient;
         if (time >= period) time = 0;
       }
+      else if (wave == 3){
+            tempphaseAcc += stepSize; 
+            phaseAcc  = (tempphaseAcc & (1 << 31));
+      }      
     }
 
     void changeEnvelope(float incr) {
@@ -238,8 +264,6 @@ class Octave {
     int octave;
 };
 
-Octave octave (-1);
-
 class DisplayItem {
   public:
     DisplayItem() {}
@@ -312,21 +336,23 @@ class Knob {
 
 // ------------ MAIN CODE ---------------
 
-
 volatile uint8_t keyArray[7];
 SemaphoreHandle_t keyArrayMutex;
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 int currentMenuRotation = 0;
 
+Octave octave (-1);
+
+
 // Setip Knobs
 Knob knobs[4] = {
   {0,0,displayLength-1},
   {0,0,10},
-  {0,0,2},
+  {0,0,3},
   {3,0,8}
 };
 
-bool keyboardIsMaster = false;
+bool keyboardIsMaster = false, leftKeyboard = false, rightKeyboard = false;
 int volumeSent = 0;
 
 void changingLevel(int currentLevel, int type) {
@@ -372,6 +398,41 @@ void CAN_TX_Task (void * pvParameters) {
 		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
     #endif
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+
+    bool changed = false;
+    uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+
+    if (!leftKeyboard && !rightKeyboard) {
+      TX_Message[0] = 1;
+      txmessage_nonvolatile[0] = TX_Message[0];
+      
+      TX_Message[1] = RX_Message[1];
+      txmessage_nonvolatile[1] = TX_Message[1];
+      TX_Message[2] = RX_Message[2];
+      txmessage_nonvolatile[2] = TX_Message[2];
+      TX_Message[3] = RX_Message[3];
+      txmessage_nonvolatile[3] = TX_Message[3];
+      changed = true;
+    }
+
+    if (keyboardIsMaster & !rightKeyboard) {
+      TX_Message[0] = RX_Message[0];
+      txmessage_nonvolatile[0] = TX_Message[0];
+
+      TX_Message[1] = knobs[3].getRotation();
+      txmessage_nonvolatile[1] = TX_Message[1];
+
+      TX_Message[2] = knobs[2].getRotation();
+      txmessage_nonvolatile[2] = TX_Message[2];
+
+      TX_Message[3] = displayItems[0].getCurrentLevelInt();
+      txmessage_nonvolatile[3] = TX_Message[3];
+
+      changed = true;
+    }
+
+    if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+
 		CAN_TX(0x123, msgOut);
 	}
 }
@@ -386,6 +447,19 @@ void decodeTask(void * pvParameters){
   #endif
   //need to recieve the command if there is a three board keyboard... need to be careful in the case that it isnt a three board keyboard, because there is a chance it will get stuck
   // threekeyboards_check = RX_Message[3];
+  
+
+  if (!leftKeyboard) {
+      volumeSent = RX_Message[1];
+      octave.changeWaveOctave(RX_Message[2]);
+      changingLevel(RX_Message[3],0);
+
+      // Serial.print("rx ");
+      Serial.println(RX_Message[0]);
+      int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
+                         ( (RX_Message[0] == 0) ? 0 : 1 );
+      if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
+    }
 
   }
 }
@@ -430,7 +504,6 @@ void scanKeysTask(void * pvParameters) {
 
   int8_t keyxor;
   int notenumber = 0; 
-  uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
 
   bool leftKeyboard, rightKeyboard;
   // int threeKeyboardCheck = 0; // 0 means unknown, 1 means false and 2 means true
@@ -470,146 +543,22 @@ void scanKeysTask(void * pvParameters) {
           }
           break;
         case 5:
-          leftKeyboard = keyArray[i] & (1 << 3);
+          // leftKeyboard = keyArray[i] & (1 << 3);
+          __atomic_store_n(&leftKeyboard, keyArray[i] & (1 << 3), __ATOMIC_RELAXED);
           break;
         case 6:
-          rightKeyboard = keyArray[i] & (1 << 3);
+          // rightKeyboard = keyArray[i] & (1 << 3);
+          __atomic_store_n(&rightKeyboard, keyArray[i] & (1 << 3), __ATOMIC_RELAXED);
           break;
       }
     }
 
-
     xSemaphoreGive(keyArrayMutex);
 
-    int newMaster = 0;
-
-    // __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);
 
 
     if (leftKeyboard) __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
     else __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);
-
-    bool changed = false;
-
-    if (!leftKeyboard && !rightKeyboard) {
-      TX_Message[0] = 1;
-      txmessage_nonvolatile[0] = TX_Message[0];
-      
-      TX_Message[1] = RX_Message[1];
-      txmessage_nonvolatile[1] = TX_Message[1];
-      TX_Message[2] = RX_Message[2];
-      txmessage_nonvolatile[2] = TX_Message[2];
-      TX_Message[3] = RX_Message[3];
-      txmessage_nonvolatile[3] = TX_Message[3];
-      changed = true;
-    }
-
-    if (keyboardIsMaster & !rightKeyboard) {
-      TX_Message[0] = RX_Message[0];
-      txmessage_nonvolatile[0] = TX_Message[0];
-
-      TX_Message[1] = knobs[3].getRotation();
-      txmessage_nonvolatile[1] = TX_Message[1];
-
-      TX_Message[2] = knobs[2].getRotation();
-      txmessage_nonvolatile[2] = TX_Message[2];
-
-      TX_Message[3] = displayItems[0].getCurrentLevelInt();
-      txmessage_nonvolatile[3] = TX_Message[3];
-
-      changed = true;
-    } else if (!leftKeyboard) {
-      volumeSent = RX_Message[1];
-      octave.changeWaveOctave(RX_Message[2]);
-      changingLevel(RX_Message[3],0);
-
-      // Serial.print("rx ");
-      Serial.println(RX_Message[0]);
-      int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
-                         ( (RX_Message[0] == 0) ? 0 : 1 );
-      if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
-    }
-    //Serial.println(octave.getOctave());
-
-    if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
-
-
-
-    // if (keyboardIsMaster && RX_Message[0] == 2 && (leftKeyboard || rightKeyboard)) {
-    //   TX_Message[0] = 1;
-    //   txmessage_nonvolatile[0] = TX_Message[0];
-    // }
-
-    // if (keyboardIsMaster && RX_Message[1] == 1) __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);;
-
-    // // If MIDDLE keyboard or no other keyboards attached, go straight to MASTER
-    // if ( (!leftKeyboard && !rightKeyboard) || (leftKeyboard && rightKeyboard) ) {
-    //   __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
-    //   newMaster = 1;
-    // }
-    // else {
-    //   int threeKeyboardCheck = RX_Message[0];
-
-    //   // If threeKeyboardCheck uninitialised, wait and see if a MIDDLE keyboard sets it
-    //   if (threeKeyboardCheck == 0) {
-    //     delayMicroseconds(100000);
-    //     threeKeyboardCheck = RX_Message[0];
-    //   }
-    //   // If threeKeyboardCheck still uninitialised or if there are not three keyboards and we are the left-most keyboard, we are MASTER
-    //   if (threeKeyboardCheck != 2 && leftKeyboard) {
-        
-    //     if (!keyboardIsMaster) newMaster = 1;
-    //     __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
-    //   }
-
-    // }
-
-    // // Serial.print(" ");
-    // // Serial.print(keyboardIsMaster);
-    // // Serial.print(" ");
-    // // Serial.print(leftKeyboard);
-    // // Serial.print(" ");
-    // // Serial.print(rightKeyboard);
-    // // Serial.print(" ");
-    // // Serial.print(RX_Message[0]);
-    // // Serial.print(" ");
-    // // Serial.println(RX_Message[1]);
-
-
-    // // if (!keyboardIsMaster) {
-    // //   if (threeKeyboardCheck == 0) delayMicroseconds(1000);
-    // //   if (RX_Message[0] == 0 && !rightKeyboard) keyboardIsMaster = true;
-    // // }
-
-
-    // if (RX_Message[1] == 1 && keyboardIsMaster) __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
-
-    // if (leftKeyboard && rightKeyboard) {
-    //   // CAN_Init(false);
-    //   if (keyboardIsMaster) {
-    //     if (!leftKeyboard && !rightKeyboard) {
-    //       TX_Message[0] = 2;
-    //       txmessage_nonvolatile[0] = TX_Message[0];
-    //     } else {
-    //       TX_Message[0] = 1;
-    //       txmessage_nonvolatile[0] = TX_Message[0];
-    //     }
-    //     TX_Message[1] = newMaster;
-    //     txmessage_nonvolatile[1] = TX_Message[1];
-    //     TX_Message[2] = knobs[3].getRotation();
-    //     txmessage_nonvolatile[2] = TX_Message[2];
-
-    //     xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
-    //   } else {
-    //     volumeSent = RX_Message[2];
-
-    //     int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0
-    //                         : ( (!leftKeyboard) ? 1 : -1 );
-    //     if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
-    //   }
-    // } else {
-    //   // CAN_Init(true);
-    // }
 
   }
 }
@@ -668,6 +617,9 @@ void displayUpdateTask(void *pvParameters)
               u8g2.drawUTF8(111,20,"\u25E0");
               u8g2.drawUTF8(119,20,"\u25E1");
               break;
+            case 3:
+              u8g2.drawStr(112,20,"/");
+              u8g2.drawStr(119,20,"\\");
             default:
               break;
           }
