@@ -1,5 +1,14 @@
-- [ES-synth-starter](#es-synth-starter)
-  * [Additional Information](#additional-information)
+# ES-synth-starter
+
+  Use this project as the starting point for your Embedded Systems labs and coursework.
+  
+  [Lab Part 1](doc/LabPart1.md)
+  
+  [Lab Part 2](doc/LabPart2.md)
+
+## Additional Information
+  [Handshaking and auto-detection](doc/handshaking.md)
+
 - [Features](#features)
   * [Polyphony](#polyphony)
     + [Implementation](#implementation)
@@ -17,21 +26,6 @@
 - [CPU Utilisation](#cpu-utilisation)
 - [Synchronisation](#synchronisation)
 - [Dependencies](#dependencies)
-
-<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
-
-
-
-# ES-synth-starter
-
-  Use this project as the starting point for your Embedded Systems labs and coursework.
-  
-  [Lab Part 1](doc/LabPart1.md)
-  
-  [Lab Part 2](doc/LabPart2.md)
-
-## Additional Information
-  [Handshaking and auto-detection](doc/handshaking.md)
 
 # Features
 ## Polyphony
