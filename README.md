@@ -39,29 +39,16 @@
 - [Dependencies](#dependencies)
 
 # Tasks
-## Scanning Keys
- ### Characterisation
- ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
-  
-## Display
- ### Characterisation
- ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
-  
-## Decoding
- ### Characterisation
- ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
-  
-## ISR
- ### Characterisation
- ### Timings
-  Theoretical minimum initiation interval: <br />
-  Measured maximum execution time: <br />
+
+| Task  | Type | Maximum execution time | Minimum initiation interval |
+| ------------- | ------------- | ------------- |
+| Scanning keys  | Type |time  |interval|
+| Display  | Type | time  |interval|
+| Decoding  | Type | time  | interval |
+| ISR  | Type | time  | interval |
+| CAN | Type | time  | interval |
+
+
 
 # Features
 ## Polyphony
