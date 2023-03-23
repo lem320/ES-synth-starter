@@ -105,7 +105,7 @@ Safe access in these classes is guaranteed by using atomic stores to store varia
 * keyArray: This is shared between scanKeys and displayUpdateTask. 
 * CAN_TX_Semaphore: This is shared between CAN_TX_ISR and CAN_TX_Task
 
-These cannot be stored atomically as it is a vector, so MUTEXs are used so that only one task can read/write to the variables at any time.
+These cannot be stored atomically as they are vectors, so MUTEXs are used so that only one task can read/write to the variables at any time.
 
 # Dependencies
 An analysis of inter-task blocking dependencies that shows any possibility of deadlock
