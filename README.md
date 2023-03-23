@@ -8,12 +8,6 @@
 
 # Contents
 - [Tasks](#tasks)
-  * [Display](#display)
-    + [Characterisation](#characterisation)
-    + [Timings](#timings)
-  * [Decoding](#decoding)
-    + [Characterisation](#characterisation)
-    + [Timings](#timings)
   * [ISR](#isr)
     + [Characterisation](#characterisation)
     + [Timings](#timings)
