@@ -28,8 +28,8 @@
 | decodeTask        | Thread     | 25.2 ms             | 0.03 µs         |                  | 
 | CAN_TX_Task       | Thread     | 60 ms               | 12 µs           |                  |  
 | sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
-| CAN_RX_ISR        | Interrupt  | 700 µs              |                 |                  | 
-| CAN_TX_ISR        | Interrupt  | 700 µs              | 6 µs            |                  | 
+| CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
+| CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
 
 
 # Features
