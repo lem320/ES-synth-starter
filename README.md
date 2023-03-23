@@ -45,7 +45,7 @@
 | Display       |      |                                    | 15180.25                      |   |   |   |
 | Decoding      |      |                                    | 501.50                        |   |   |   |
 | Attach ISR    |      |                                    | 430.44                        |   |   |   |
-| CAN           |      |                                    | 0.72                          |   |   |   |
+| CAN           |      |                                    | 23.00                         |   |   |   |
 
 
 # Features
