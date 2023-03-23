@@ -453,41 +453,6 @@ void CAN_TX_Task (void * pvParameters) {
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
 
     CAN_TX(0x123, msgOut);
-    // Serial.println("123");
-
-    // bool changed = false;
-    // uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
-
-    // if (!leftKeyboard && !rightKeyboard) {
-    //   TX_Message[0] = 1;
-    //   txmessage_nonvolatile[0] = TX_Message[0];
-      
-    //   TX_Message[1] = RX_Message[1];
-    //   txmessage_nonvolatile[1] = TX_Message[1];
-    //   TX_Message[2] = RX_Message[2];
-    //   txmessage_nonvolatile[2] = TX_Message[2];
-    //   TX_Message[3] = RX_Message[3];
-    //   txmessage_nonvolatile[3] = TX_Message[3];
-    //   changed = true;
-    // }
-
-    // if (keyboardIsMaster & !rightKeyboard) {
-    //   TX_Message[0] = RX_Message[0];
-    //   txmessage_nonvolatile[0] = TX_Message[0];
-
-    //   TX_Message[1] = knobs[3].getRotation();
-    //   txmessage_nonvolatile[1] = TX_Message[1];
-
-    //   TX_Message[2] = knobs[2].getRotation();
-    //   txmessage_nonvolatile[2] = TX_Message[2];
-
-    //   TX_Message[3] = displayItems[0].getCurrentLevelInt();
-    //   txmessage_nonvolatile[3] = TX_Message[3];
-
-    //   changed = true;
-    // }
-
-    // if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
 
 	}
 }
@@ -502,22 +467,6 @@ void decodeTask(void * pvParameters){
   #ifndef TEST_DECODE
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
   #endif
-  //need to recieve the command if there is a three board keyboard... need to be careful in the case that it isnt a three board keyboard, because there is a chance it will get stuck
-  // threekeyboards_check = RX_Message[3];
-  
-  // Serial.println("Hi");
-
-  // if (!leftKeyboard) {
-  //     volumeSent = RX_Message[1];
-  //     octave.changeWaveOctave(RX_Message[2]);
-  //     changingLevel(RX_Message[3],0);
-
-  //     // Serial.print("rx ");
-  //     Serial.println(RX_Message[0]);
-  //     int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
-  //                        ( (RX_Message[0] == 0) ? 0 : 1 );
-  //     if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
-  //   }
 
   }
 }
