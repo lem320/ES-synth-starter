@@ -11,27 +11,31 @@
 - [Features](#features)
   * [Polyphony](#polyphony)
     + [Implementation](#implementation)
+    + [Timings](#timings)
   * [Envelope](#envelope)
     + [Implementation](#implementation-1)
+    + [Timings](#timings-1)
   * [Waveform Selection](#waveform-selection)
     + [Implementation](#implementation-2)
+    + [Timings](#timings-2)
   * [Low Frequency Oscillator](#low-frequency-oscillator)
     + [Implementation](#implementation-3)
-  * [Advanced Display](#advanced-display)
-    + [Implementation](#implementation-4)
+    + [Timings](#timings-3)
 - [Rate Monotonic Scheduler](#rate-monotonic-scheduler)
 - [CPU Utilisation](#cpu-utilisation)
 - [Synchronisation](#synchronisation)
 - [Dependencies](#dependencies)
 
 # Tasks
-| Task          | Type       | Initiation Interval (milliseconds) | Execution Time (microseconds) | 
-|---------------|------------|------------------------------------|-------------------------------|
-| Scanning keys | Thread     | 20                                 | 83.72                         |  
-| Display       | Thread     | 100                                | 15180.25                      |  
-| Decoding      | Thread     |                                    | 501.50                        |  
-| Attach ISR    | Interrupt  |                                    | 430.44                        |  
-| CAN           | Thread     |                                    | 23.00                         |  
+| Task              | Type       | Initiation Interval (milliseconds) | Execution Time (microseconds) | 
+|-------------------|------------|------------------------------------|-------------------------------|
+| scanKeysTask      | Thread     | 20                                 | 83.72                         |  
+| displayUpdateTask | Thread     | 100                                | 15180.25                      |  
+| decodeTask        | Thread     |                                    | 501.50                        | 
+| CAN               | Thread     |                                    | 23.00                         |  
+| sampleISR         | Interrupt  |                                    | 430.44                        |
+| CAN_RX_ISR        | Interrupt  | 0.7                                |                               | 
+| CAN_TX_ISR        | Interrupt  | 0.7                                |                               | 
 
 
 # Features
