@@ -110,7 +110,7 @@ These cannot be stored atomically as they are vectors, so MUTEXs are used so tha
 # Dependencies
 An analysis of inter-task blocking dependencies that shows any possibility of deadlock
 
-## Blocking functions used include:
+## Blocking functions used
 * vTaskDelayUntil: This function blocks a task from running until a set time has elapsed. This function cannot cause a deadlock though as it can only block for a finite amount of time.
 * xSemaphoreTake: This function blocks a task as it waits to be able to take a MUTEX once the task that has the MUTEX has completed its goal, it will call xSemaphoreGive so that another task can take the MUTEX if it takes it in time. This function can cause a deadlock if a task holds the MUTEX indefinitely as it will cause all other functions waiting for the MUTEX to wait indefinitely.
 
