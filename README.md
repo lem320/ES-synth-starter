@@ -14,12 +14,14 @@
   ### Implementation
   An identification of all the tasks that are performed by the system with their method of implementation, thread or interrupt
   ### Timings
-  A characterisation of each task with its theoretical minimum initiation interval and measured
-maximum execution time
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
 
 ## Envelope
   ### Implementation
   ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
 
 ## Waveform Selection
   ### Implementation
@@ -27,10 +29,14 @@ maximum execution time
 
   Triangle wave: The phase accumulator is increased until one more step would cause it to overflow, then it switches states to decrease. It repeats this action until the value would overflow the other way, and continues to repeat. <br />
   ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
 
 ## Low Frequency Oscillator
   ### Implementation
   ### Timings
+  Theoretical minimum initiation interval: <br />
+  Measured maximum execution time: <br />
 
 
 
