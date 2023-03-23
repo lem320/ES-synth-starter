@@ -23,13 +23,13 @@
 # Tasks
 | Task              | Type       | Initiation Interval | Execution Time  | Characterisation |
 |-------------------|------------|---------------------|-----------------|------------------|
-| scanKeysTask      | Thread     | 20 ms               | 83.7 µs         |                  |  
+| scanKeysTask      | Thread     | 20 ms               | 84 µs           |                  |
 | displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |                  |  
-| decodeTask        | Thread     | 25.5 ms             | 501.5 µs        |                  | 
-| CAN_TX_Task       | Thread     | 60 ms               | 23 µs           |                  |  
-| sampleISR         | Interrupt  | 45.5 µs             | 430.4 µs        |                  |
+| decodeTask        | Thread     | 25.5 ms             | 0.03 µs         |                  | 
+| CAN_TX_Task       | Thread     | 60 ms               | 12 µs           |                  |  
+| sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
 | CAN_RX_ISR        | Interrupt  | 700 µs              |                 |                  | 
-| CAN_TX_ISR        | Interrupt  | 700 µs              |                 |                  | 
+| CAN_TX_ISR        | Interrupt  | 700 µs              | 6 µs            |                  | 
 
 
 # Features
@@ -89,26 +89,12 @@
 A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met
 under worst-case conditions
 
-The critical instant is the time instant at which the system is most loaded and therefore has the worst response time.
-
 # CPU Utilisation
 A quantification of total CPU utilisation
 
 # Synchronisation
-
-Shared data structures:
-* Octave: This is shared between scanKeys (to set the key being pressed), displayUpdateTask (to display the keys being pressed) and sampleISR (to retrieve the sound for the speaker to make).
-* Note: This is shared between scanKeys (called from Octave to set if the key it corresponds to is being pressed) and sampleISR (to retrieve the sound from each note to be summed by an Octave class function).
-* DisplayItem: This is shared between scanKeys (to get the level to send over CAN) and displayUpdateTask (to set the level).
-* Knob: This is shared between scanKeys (to get the level to send over CAN), displayUpdateTask (to display the level) and sampleISR (to set the volume using the forth knob).
-
-Safe access in these classes is guaranteed by using atomic stores to store variables within the class that are shared between the tasks.
-
-Shared vectors:
-* keyArray: This is shared between scanKeys and displayUpdateTask. 
-* CAN_TX_Semaphore: This is shared between CAN_TX_ISR and CAN_TX_Task
-
-These cannot be stored atomically as it is a vector, so MUTEXs are used so that only one task can read/write to the variables at any time.
+An identification of all the shared data structures and the methods used to guarantee safe access
+and synchronisation
 
 # Dependencies
 An analysis of inter-task blocking dependencies that shows any possibility of deadlock
