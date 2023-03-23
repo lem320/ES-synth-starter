@@ -39,15 +39,13 @@
 - [Dependencies](#dependencies)
 
 # Tasks
-
-| Task  | Type | Maximum execution time | Minimum initiation interval |
-| ------------- | ------------- | ------------- |
-| Scanning keys  | Type |time  |interval|
-| Display  | Type | time  |interval|
-| Decoding  | Type | time  | interval |
-| ISR  | Type | time  | interval |
-| CAN | Type | time  | interval |
-
+| Task          | Type | Initiation Interval (milliseconds) | Execution Time (microseconds) |   |   |   |
+|---------------|------|------------------------------------|-------------------------------|---|---|---|
+| Scanning keys |      |                                    | 83.72                         |   |   |   |
+| Display       |      |                                    | 15180.25                      |   |   |   |
+| Decoding      |      |                                    | 501.50                        |   |   |   |
+| Attach ISR    |      |                                    | 430.44                        |   |   |   |
+| CAN           |      |                                    | 0.72                          |   |   |   |
 
 
 # Features
