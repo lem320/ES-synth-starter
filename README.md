@@ -18,6 +18,7 @@
   * [Low Frequency Oscillator](#low-frequency-oscillator)
     + [Implementation](#implementation-3)
   * [Advanced Display](#advanced-display)
+    + [Implementation](#implementation-4)
 - [Rate Monotonic Scheduler](#rate-monotonic-scheduler)
 - [CPU Utilisation](#cpu-utilisation)
 - [Synchronisation](#synchronisation)
