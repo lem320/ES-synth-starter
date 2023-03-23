@@ -93,7 +93,8 @@ Using initiation interval times and the execution times, we consider the largest
 
 
 # CPU Utilisation
-A quantification of total CPU utilisation
+
+As the critical deadline was 73.65ms for a task of initiation interval 100ms, the maximum CPU usage will be 73.65/100 = 73.65%.
 
 # Synchronisation
 
