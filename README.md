@@ -1,5 +1,5 @@
 # ES-synth
-
+<!-- 
 # Contents
 - [Tasks](#tasks)
 - [Features](#features)
@@ -18,7 +18,7 @@
 - [Rate Monotonic Scheduler](#rate-monotonic-scheduler)
 - [CPU Utilisation](#cpu-utilisation)
 - [Synchronisation](#synchronisation)
-- [Dependencies](#dependencies)
+- [Dependencies](#dependencies) -->
 
 # Features
 ## Polyphony
