@@ -78,9 +78,9 @@ Priority     | Task              | Type       | Initiation Interval | Execution 
 2            | decodeTask        | Thread     | 25.2 ms             | 0.03 µs         |                  | 
 3            | CAN_TX_Task       | Thread     | 60 ms               | 12 µs           |                  |
 4            | displayUpdateTask | Thread     | 100 ms              | 15.2 ms         |                  |
--            | sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
--            | CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
--            | CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
+             | sampleISR         | Interrupt  | 45.5 µs             | 26 µs           |                  |
+             | CAN_RX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
+             | CAN_TX_ISR        | Interrupt  | 700 µs              | 3 µs            |                  | 
 
 
 
