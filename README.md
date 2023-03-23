@@ -23,6 +23,8 @@ maximum execution time
 
 ## Waveform Selection
   ### Implementation
+  Square wave: Implemented through making the output the most significant bit of the saw tooth wave.
+  Triangle wave: Implemented through increasing the phase accumulator until it is about to overflow if another step is done - then it switches states to decrease its value until before it overflows the opposite way. 
   ### Timings
 
 ## Low Frequency Oscillator
