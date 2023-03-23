@@ -1,3 +1,27 @@
+- [ES-synth-starter](#es-synth-starter)
+  * [Additional Information](#additional-information)
+- [Features](#features)
+  * [Polyphony](#polyphony)
+    + [Implementation](#implementation)
+    + [Timings](#timings)
+  * [Envelope](#envelope)
+    + [Implementation](#implementation-1)
+    + [Timings](#timings-1)
+  * [Waveform Selection](#waveform-selection)
+    + [Implementation](#implementation-2)
+    + [Timings](#timings-2)
+  * [Low Frequency Oscillator](#low-frequency-oscillator)
+    + [Implementation](#implementation-3)
+    + [Timings](#timings-3)
+- [Rate Monotonic Scheduler](#rate-monotonic-scheduler)
+- [CPU Utilisation](#cpu-utilisation)
+- [Synchronisation](#synchronisation)
+- [Dependencies](#dependencies)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
+
+
 # ES-synth-starter
 
   Use this project as the starting point for your Embedded Systems labs and coursework.
