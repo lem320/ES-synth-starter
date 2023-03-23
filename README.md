@@ -6,9 +6,6 @@
   
   [Lab Part 2](doc/LabPart2.md)
 
-## Additional Information
-  [Handshaking and auto-detection](doc/handshaking.md)
-
 - [Features](#features)
   * [Polyphony](#polyphony)
     + [Implementation](#implementation)
