@@ -58,8 +58,9 @@
   This keyboard has an option to add a Low Frequency Oscillator onto the output. This is set in the menu on the Master Keyboard's dislpay.
   
   The LFO was implemented by superimposing a low frequency and small amplitude sine wave onto the output of each key in the Note class.
-
   
+## Keyboard Auto-Detect
+  Multiple keyboards can be stacked together and controlled by a single master keyboard. The master will always be the left-most keyboard in this implementation. The keyboard also supports auto-detection and hot-swapping as any keyboard can be connected in any orientation or disconnected at anytime and still work as intended.
   
  ## Advanced Display
   A user friendly user interface was implemented on the display which shows a menu on the left, listing all additional features that can be turned on or off, and the current volume and waveform being outputted. As well as this, the current keys that are being played are displayed allong the bottom of the display.
