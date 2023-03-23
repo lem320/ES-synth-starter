@@ -23,7 +23,7 @@ maximum execution time
 
 ## Waveform Selection
   ### Implementation
-  Square wave:The output is changed to make it the most significant bit of the saw-tooth wave.<br />
+  Square wave: The output is changed to make it the most significant bit of the saw-tooth wave.<br />
 
   Triangle wave: The phase accumulator is increased until one more step would cause it to overflow, then it switches states to decrease. It repeats this action until the value would overflow the other way, and continues to repeat. <br />
   ### Timings
