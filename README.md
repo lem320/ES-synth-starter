@@ -30,13 +30,13 @@
 - [Dependencies](#dependencies)
 
 # Tasks
-| Task          | Type | Initiation Interval (milliseconds) | Execution Time (microseconds) | 
-|---------------|------|------------------------------------|-------------------------------|
-| Scanning keys |      |                                    | 83.72                         |  
-| Display       |      |                                    | 15180.25                      |  
-| Decoding      |      |                                    | 501.50                        |  
-| Attach ISR    |      |                                    | 430.44                        |  
-| CAN           |      |                                    | 23.00                         |  
+| Task          | Type       | Initiation Interval (milliseconds) | Execution Time (microseconds) | 
+|---------------|------------|------------------------------------|-------------------------------|
+| Scanning keys | Thread     |                                    | 83.72                         |  
+| Display       | Thread     |                                    | 15180.25                      |  
+| Decoding      | Thread     |                                    | 501.50                        |  
+| Attach ISR    | Interrupt  |                                    | 430.44                        |  
+| CAN           | Thread     |                                    | 23.00                         |  
 
 
 # Features
