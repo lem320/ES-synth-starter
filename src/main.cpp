@@ -56,9 +56,9 @@ uint32_t tempphaseAcc;
 
 
 #define max_notes 1.0
-#define displayLength 5
+#define displayLength 3
 
-const float interuptFreq = 22000;
+const float interuptFreq = 5000;
 const double hz = 440;
 const double freq_diff = pow(2, (1.0 / 12.0));
 const double a = pow(2.0, 32) / interuptFreq;
@@ -88,7 +88,7 @@ SemaphoreHandle_t CAN_TX_Semaphore;
 
 // ------------ DATA STRUCTURES ---------------
 
-uint32_t sine_table[5001];
+uint32_t sine_table[500];
 
 class Filter {
   public:
@@ -142,9 +142,9 @@ class Note {
 
       // Serial.println(sine_table[(int)(fmodf(frequency*time,1.0)*5000)]);
       if (envelopeActive) setEnvelope();
-      if (envelopeActive && lfoOn) return phaseAcc*0*envelope + 1.0*sine_table[(int)(fmodf(3*time,1.0)*5000)];
+      if (envelopeActive && lfoOn) return phaseAcc*0.9*envelope + 0.1*sine_table[(int)(fmodf(3*time,1.0)*500)];
       else if (envelopeActive && !lfoOn) return phaseAcc*envelope;
-      else if (lfoOn) return phaseAcc*0.5 + 1*sine_table[(int)(5*time*5000)];
+      else if (lfoOn) return phaseAcc*0.9 + 0.1*sine_table[(int)(5*time*500)];
       return phaseAcc;
     }
 
@@ -209,7 +209,7 @@ class Note {
         }
       }
       else if (wave == 2) {
-        phaseAcc = sine_table[(int)(fmodf(frequency*time,1.0)*5000)];
+        phaseAcc = sine_table[(int)(fmodf(frequency*time,1.0)*500)];
       }
       else if (wave == 3){
             tempphaseAcc += stepSize; 
@@ -288,14 +288,13 @@ class Octave {
 
     void changeOctave(int pOctave) {
       octave = pOctave;
-      Serial.println(octave);
       for (int i=0; i<12; i++) 
         notes[i]->setTone(octave); // +octave*12
     }
 
     void changeFilter(int pFilter) {
-      if (pFilter == 0) filterOn = false;
-      else if (pFilter == 1) filterOn = true;
+      if (pFilter == 0) __atomic_store_n(&filterOn, false, __ATOMIC_RELAXED);
+      else if (pFilter == 1) __atomic_store_n(&filterOn, true, __ATOMIC_RELAXED);
     }
     void changeLFO(int pLFO) {
       for (int i=0; i<12; i++) 
@@ -326,8 +325,8 @@ class DisplayItem {
 
     int changeLevel(int inc) {
       currentLevel += inc;
-      if (currentLevel > 1) currentLevel = 1;
-      else if (currentLevel < 0) currentLevel = 0;
+      if (currentLevel > 1) __atomic_store_n(&currentLevel, 1, __ATOMIC_RELAXED);
+      else if (currentLevel < 0) __atomic_store_n(&currentLevel, 0, __ATOMIC_RELAXED);
       // function(currentLevel);
       return currentLevel;
     }
@@ -425,13 +424,11 @@ char* boolLevels[2] = {(char*)"Off",(char*)"On"};
 DisplayItem displayItems[displayLength] = {
   {(char*)"Envelope",boolLevels,1},
   {(char*)"Filtering",boolLevels,0},
-
   {(char*)"LFO",boolLevels,0},
-  {(char*)"PH 2",boolLevels,0},
-  {(char*)"PH 3",boolLevels,0}
+  // {(char*)"PH 2",boolLevels,0},
+  // {(char*)"PH 3",boolLevels,0}
 
 };
-
 
 // CAN FUNCITONS
 void CAN_RX_ISR (void) {
@@ -452,46 +449,46 @@ void CAN_TX_Task (void * pvParameters) {
 	while (1) 
   #endif
   {
-    #ifndef TEST_CAN
 		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
-    #endif
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
 
-    bool changed = false;
-    uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+    CAN_TX(0x123, msgOut);
+    // Serial.println("123");
 
-    if (!leftKeyboard && !rightKeyboard) {
-      TX_Message[0] = 1;
-      txmessage_nonvolatile[0] = TX_Message[0];
+    // bool changed = false;
+    // uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+
+    // if (!leftKeyboard && !rightKeyboard) {
+    //   TX_Message[0] = 1;
+    //   txmessage_nonvolatile[0] = TX_Message[0];
       
-      TX_Message[1] = RX_Message[1];
-      txmessage_nonvolatile[1] = TX_Message[1];
-      TX_Message[2] = RX_Message[2];
-      txmessage_nonvolatile[2] = TX_Message[2];
-      TX_Message[3] = RX_Message[3];
-      txmessage_nonvolatile[3] = TX_Message[3];
-      changed = true;
-    }
+    //   TX_Message[1] = RX_Message[1];
+    //   txmessage_nonvolatile[1] = TX_Message[1];
+    //   TX_Message[2] = RX_Message[2];
+    //   txmessage_nonvolatile[2] = TX_Message[2];
+    //   TX_Message[3] = RX_Message[3];
+    //   txmessage_nonvolatile[3] = TX_Message[3];
+    //   changed = true;
+    // }
 
-    if (keyboardIsMaster & !rightKeyboard) {
-      TX_Message[0] = RX_Message[0];
-      txmessage_nonvolatile[0] = TX_Message[0];
+    // if (keyboardIsMaster & !rightKeyboard) {
+    //   TX_Message[0] = RX_Message[0];
+    //   txmessage_nonvolatile[0] = TX_Message[0];
 
-      TX_Message[1] = knobs[3].getRotation();
-      txmessage_nonvolatile[1] = TX_Message[1];
+    //   TX_Message[1] = knobs[3].getRotation();
+    //   txmessage_nonvolatile[1] = TX_Message[1];
 
-      TX_Message[2] = knobs[2].getRotation();
-      txmessage_nonvolatile[2] = TX_Message[2];
+    //   TX_Message[2] = knobs[2].getRotation();
+    //   txmessage_nonvolatile[2] = TX_Message[2];
 
-      TX_Message[3] = displayItems[0].getCurrentLevelInt();
-      txmessage_nonvolatile[3] = TX_Message[3];
+    //   TX_Message[3] = displayItems[0].getCurrentLevelInt();
+    //   txmessage_nonvolatile[3] = TX_Message[3];
 
-      changed = true;
-    }
+    //   changed = true;
+    // }
 
-    if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+    // if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
 
-		CAN_TX(0x123, msgOut);
 	}
 }
 
@@ -501,24 +498,26 @@ void decodeTask(void * pvParameters){
     while(1) 
   #endif
   {
+
   #ifndef TEST_DECODE
-  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
+    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY); 
   #endif
   //need to recieve the command if there is a three board keyboard... need to be careful in the case that it isnt a three board keyboard, because there is a chance it will get stuck
   // threekeyboards_check = RX_Message[3];
   
+  // Serial.println("Hi");
 
-  if (!leftKeyboard) {
-      volumeSent = RX_Message[1];
-      octave.changeWaveOctave(RX_Message[2]);
-      changingLevel(RX_Message[3],0);
+  // if (!leftKeyboard) {
+  //     volumeSent = RX_Message[1];
+  //     octave.changeWaveOctave(RX_Message[2]);
+  //     changingLevel(RX_Message[3],0);
 
-      // Serial.print("rx ");
-      Serial.println(RX_Message[0]);
-      int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
-                         ( (RX_Message[0] == 0) ? 0 : 1 );
-      if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
-    }
+  //     // Serial.print("rx ");
+  //     Serial.println(RX_Message[0]);
+  //     int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
+  //                        ( (RX_Message[0] == 0) ? 0 : 1 );
+  //     if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
+  //   }
 
   }
 }
@@ -553,7 +552,6 @@ void sampleISR() {
   int32_t Vout = (octave.getNextTotalPhaseAcc() >> 24) - 128;
   int volume = (keyboardIsMaster) ? knobs[3].getRotation() : volumeSent;
   Vout = Vout >> (8 - volume);
-  // Serial.println(Vout+128);
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -622,6 +620,54 @@ void scanKeysTask(void * pvParameters) {
 
     if (leftKeyboard) __atomic_store_n(&keyboardIsMaster, true, __ATOMIC_RELAXED);
     else __atomic_store_n(&keyboardIsMaster, false, __ATOMIC_RELAXED);
+
+    bool changed = false;
+    uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+
+    if (!leftKeyboard && !rightKeyboard) {
+      TX_Message[0] = 1;
+      txmessage_nonvolatile[0] = TX_Message[0];
+
+      TX_Message[1] = RX_Message[1];
+      txmessage_nonvolatile[1] = TX_Message[1];
+      TX_Message[2] = RX_Message[2];
+      txmessage_nonvolatile[2] = TX_Message[2];
+      TX_Message[3] = RX_Message[3];
+      txmessage_nonvolatile[3] = TX_Message[3];
+      TX_Message[4] = RX_Message[4];
+      txmessage_nonvolatile[4] = TX_Message[4];
+
+      changed = true;
+    }
+
+    if (keyboardIsMaster & !rightKeyboard) {
+      TX_Message[0] = RX_Message[0];
+      txmessage_nonvolatile[0] = TX_Message[0];
+
+      TX_Message[1] = knobs[3].getRotation();
+      txmessage_nonvolatile[1] = TX_Message[1];
+
+      TX_Message[2] = knobs[2].getRotation();
+      txmessage_nonvolatile[2] = TX_Message[2];
+
+      TX_Message[3] = displayItems[0].getCurrentLevelInt();
+      txmessage_nonvolatile[3] = TX_Message[3];
+
+      TX_Message[4] = displayItems[1].getCurrentLevelInt();
+      txmessage_nonvolatile[4] = TX_Message[4];
+      changed = true;
+    } else if (!leftKeyboard) {
+      volumeSent = RX_Message[1];
+      octave.changeWaveOctave(RX_Message[2]);
+      changingLevel(RX_Message[3],0);
+
+      changingLevel(RX_Message[4],1);
+
+      int octaveSent = (!leftKeyboard && !rightKeyboard) ? 0 :
+                         ( (RX_Message[0] == 0) ? 0 : 1 );
+      if (octaveSent != octave.getOctave()) octave.changeOctave(octaveSent);
+    }
+    if (changed) xQueueSend( msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
 
   }
 }
@@ -760,7 +806,6 @@ void setup() {
   #ifndef TEST_CAN_RX_ISR
     CAN_RegisterRX_ISR(CAN_RX_ISR);
   #endif
-
   #ifndef TEST_CAN_TX_ISR
     CAN_RegisterTX_ISR(CAN_TX_ISR);
   #endif
@@ -769,8 +814,8 @@ void setup() {
   CAN_Start();
 
   // fill_sintable();
-  for (int index = 0; index < 5001; index++) {
-    sine_table[index] = b*(sin(2*PI * (index / 5000.0))+1); // freq = 1
+  for (int index = 0; index < 500; index++) {
+    sine_table[index] = b*(sin(2*PI * (index / 500.0))+1); // freq = 1
   }
 
   // Init display items
@@ -832,7 +877,7 @@ void setup() {
       "scanKeys",		/* Text name for the task */
       64,      		/* Stack size in words, not bytes */
       NULL,			/* Parameter passed into the task */
-      4,			/* Task priority */
+      1,			/* Task priority */
       &scanKeysHandle );  /* Pointer to store the task handle */
 
     xTaskCreate(
@@ -856,76 +901,72 @@ void setup() {
       "displayUpdate",		/* Text name for the task */  
       64,      		/* Stack size in words, not bytes */
       NULL,			/* Parameter passed into the task */
-      1,			/* Task priority */
+      4,			/* Task priority */
       &displayUpdateHandle );  /* Pointer to store the task handle */
   #endif
 
   #ifdef TEST_SCANKEYS
+    Serial.println("Scanning Keys execution time");
     uint32_t startTime = micros();
     for (int iter = 0; iter < 32; iter++) {
       scanKeysTask(NULL);
     }
-    Serial.println("Scanning Keys execution time");
     Serial.println(micros()-startTime);
     while(1);
   #endif
 
   #ifdef TEST_DISPLAY
+    Serial.println("Display execution time");
     uint32_t startTime = micros();
     for (int iter = 0; iter < 32; iter++) {
       displayUpdateTask(NULL);
     }
-    Serial.println("Display execution time");
     Serial.println(micros()-startTime);
     while(1);
   #endif
 
   #ifdef TEST_CAN
-    uint32_t startTime = micros();
-    for (int iter = 0; iter < 32; iter++) {
-      CAN_TX_Task(NULL);
-    }
     Serial.println("CAN execution time");
+    uint8_t txmessage_nonvolatile[8] = {0,0,0,0,0,0,0,0};
+    for (int iter =0; iter < 36; iter++) {
+      xQueueSend(msgOutQ, txmessage_nonvolatile, portMAX_DELAY);
+    }
+    uint32_t startTime = micros();
+    CAN_TX_Task(NULL);
     Serial.println(micros()-startTime);
     while(1);
   #endif
 
   #ifdef TEST_DECODE
+    Serial.println("Decoding execution time");
     uint32_t startTime = micros();
     for (int iter = 0; iter < 32; iter++) {
       decodeTask(NULL);
     }
-    Serial.println("Decoding execution time");
     Serial.println(micros()-startTime);
     while(1);
   #endif
 
   #ifdef TEST_ATTACH_ISR
-    uint32_t startTime = micros();
-    for (int iter = 0; iter < 32; iter++) {
-      sampleISR();
-    }
     Serial.println("Attach ISR execution time");
+    uint32_t startTime = micros();
+      sampleISR();
     Serial.println(micros()-startTime);
     while(1);
   #endif
 
   #ifdef TEST_CAN_TX_ISR
-    uint32_t startTime = micros();
-    for (int iter = 0; iter < 32; iter++) {
-      CAN_TX_ISR();
-    }
     Serial.println("CAN TX ISR execution time");
+    uint32_t startTime = micros();
+    CAN_RegisterTX_ISR(CAN_RX_ISR);
     Serial.println(micros()-startTime);
     while(1);
   #endif
 
   #ifdef TEST_CAN_RX_ISR
-    uint32_t startTime = micros();
-    for (int iter = 0; iter < 32; iter++) {
-      CAN_RX_ISR();
-    }
     Serial.println("CAN RX ISR execution time");
+    uint32_t startTime = micros();
+    CAN_RegisterRX_ISR(CAN_RX_ISR);
     Serial.println(micros()-startTime);
     while(1);
   #endif
